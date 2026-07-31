@@ -2,5 +2,7 @@ name: flex-pse-examples
 channels:
   - conda-forge
 dependencies:
-  - python=3.11
+  - python=3.13
   - pip
+  - pip:
+      - flex-pse[solvers] @ git+https://github.com/flex-pse/flex-pse.git@main
