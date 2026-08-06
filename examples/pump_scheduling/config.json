@@ -1,4 +1,141 @@
 {
   "name": "pump_scheduling",
-  "description": "Configuration for the pump scheduling example."
+  "description": "Two-pump water plant scheduling against a time-of-use tariff, framed as a flexibility-versus-storage trade-off. A feed pump fills a tank across a fixed pressure differential; a product pump draws from the tank to meet a fixed user demand profile. The comparison is a 2x2: an inflexible facility (feed pump held at a constant duty for all 24 hours) or a flexible one (feed pump scheduled against the tariff), each paired with a large or a small battery.",
+  "time": {
+    "start_date": "2025-07-08",
+    "end_date": "2025-07-09",
+    "time_step_hours": 1
+  },
+  "fluid": {
+    "density_kg_per_m3": 1000.0,
+    "suction_pressure_bar": 1.0
+  },
+  "feed_pump": {
+    "_comment": "Pumps into the tank. In the flexible strategy it is semicontinuous: either off, or anywhere in [min_flow_fraction, 1.0] of rated flow. In the inflexible strategy it is pinned at a single constant flow for the whole horizon (see model.inflexible_flow_m3_per_hr). delta_pressure_bar is the fixed pressure differential across the pump.",
+    "rated_flow_m3_per_hr": 250.0,
+    "min_flow_fraction": 0.6,
+    "delta_pressure_bar": 4.0,
+    "efficiency": 0.75
+  },
+  "tank": {
+    "_comment": "Sized so the flexible strategy can pre-fill and ride the whole peak window on stored water, but so the inflexible strategy -- which cannot pre-fill, because its pump never modulates -- gains nothing from it.",
+    "max_volume_m3": 1500.0,
+    "initial_volume_m3": 500.0,
+    "level_min": 0.1,
+    "level_max": 0.95,
+    "terminal_volume_m3": 500.0
+  },
+  "product_pump": {
+    "_comment": "Draws from the tank and delivers to the user/product flow. Its flow is set by product_demand_m3_per_hr, so it is an inflexible load under either strategy.",
+    "delta_pressure_bar": 2.0,
+    "efficiency": 0.7
+  },
+  "product_demand_m3_per_hr": [
+    120.0, 110.0, 100.0, 100.0, 110.0, 130.0, 175.0, 205.0,
+    225.0, 215.0, 205.0, 195.0, 190.0, 190.0, 195.0, 205.0,
+    235.0, 245.0, 235.0, 205.0, 175.0, 155.0, 145.0, 135.0
+  ],
+  "battery": {
+    "_comment": "Sizing options are fractions of the plant's peak electrical load (see reference_load_kw): power ratings are fraction * peak load, and energy capacity is fraction * peak load * storage_duration_hours.",
+    "sizing_options": {
+      "large": 1.0,
+      "small": 0.4
+    },
+    "storage_duration_hours": 5.0,
+    "eta_charge": 0.95,
+    "eta_discharge": 0.95,
+    "soc_min": 0.1,
+    "soc_max": 0.95,
+    "initial_soc": 0.5
+  },
+  "scenarios": {
+    "_comment": "The 2x2. 'flexible' selects the feed pump strategy; 'battery' names a key of battery.sizing_options. 'selected' is the case the single-schedule charts render.",
+    "selected": "flexible + small battery",
+    "cases": [
+      {"label": "inflexible + large battery", "flexible": false, "battery": "large"},
+      {"label": "inflexible + small battery", "flexible": false, "battery": "small"},
+      {"label": "flexible + large battery", "flexible": true, "battery": "large"},
+      {"label": "flexible + small battery", "flexible": true, "battery": "small"}
+    ]
+  },
+  "tariff": {
+    "_comment": "EECO rate_data records. Peak window is 16:00-21:00 (hour_end exclusive), where energy is 4.5x the off-peak price and a monthly demand charge applies.",
+    "tariff_data": [
+      {
+        "utility": "electric",
+        "type": "customer",
+        "name": "fixed",
+        "assessed": "monthly",
+        "month_start": 1,
+        "month_end": 12,
+        "weekday_start": 0,
+        "weekday_end": 6,
+        "hour_start": 0,
+        "hour_end": 24,
+        "basic_charge_limit (metric)": 0,
+        "charge (metric)": 150.0,
+        "units": "$/month"
+      },
+      {
+        "utility": "electric",
+        "type": "demand",
+        "name": "peak_demand",
+        "assessed": "monthly",
+        "month_start": 1,
+        "month_end": 12,
+        "weekday_start": 0,
+        "weekday_end": 6,
+        "hour_start": 16,
+        "hour_end": 21,
+        "basic_charge_limit (metric)": 0,
+        "charge (metric)": 21.5,
+        "units": "$/kW"
+      },
+      {
+        "utility": "electric",
+        "type": "energy",
+        "name": "offpeak_energy",
+        "assessed": "",
+        "month_start": 1,
+        "month_end": 12,
+        "weekday_start": 0,
+        "weekday_end": 6,
+        "hour_start": 0,
+        "hour_end": 16,
+        "basic_charge_limit (metric)": 0,
+        "charge (metric)": 0.1,
+        "units": "$/kWh"
+      },
+      {
+        "utility": "electric",
+        "type": "energy",
+        "name": "peak_energy",
+        "assessed": "",
+        "month_start": 1,
+        "month_end": 12,
+        "weekday_start": 0,
+        "weekday_end": 6,
+        "hour_start": 16,
+        "hour_end": 21,
+        "basic_charge_limit (metric)": 0,
+        "charge (metric)": 0.45,
+        "units": "$/kWh"
+      },
+      {
+        "utility": "electric",
+        "type": "energy",
+        "name": "night_energy",
+        "assessed": "",
+        "month_start": 1,
+        "month_end": 12,
+        "weekday_start": 0,
+        "weekday_end": 6,
+        "hour_start": 21,
+        "hour_end": 24,
+        "basic_charge_limit (metric)": 0,
+        "charge (metric)": 0.1,
+        "units": "$/kWh"
+      }
+    ]
+  }
 }
