@@ -1,15 +1,14 @@
 # flex-pse-examples
 
-A repository of example test problems built with [flex-pse](https://github.com/flex-pse/flex-pse).
+A repository of example test problems built with [flex-pse](https://github.com/flex-pse/flexPSE).
 
 Each example lives in its own directory under [examples/](examples/) and follows the same
 layout: a `config.json` describing the problem instance, and a `notebook.py`
 [marimo](https://marimo.io) notebook that loads the config, builds the model, solves it, and
 walks through the results interactively.
 
-> **Status:** the example directories are currently scaffolds — the config and notebook files
-> are in place, but the problem definitions have not been filled in yet. The table below
-> tracks what each one is intended to cover.
+> **Status:** the table below tracks each example's status. A *scaffold* has its `config.json`
+> and `notebook.py` in place but no problem definition yet.
 
 ## Table of Contents
 
@@ -27,14 +26,55 @@ walks through the results interactively.
 
 | Example | Directory | Status |
 | --- | --- | --- |
-| [Desalination Scheduling](#desalination-scheduling) | [examples/desalination_scheduling/](examples/desalination_scheduling/) | Scaffold |
+| [Desalination Scheduling](#desalination-scheduling) | [examples/desalination_scheduling/](examples/desalination_scheduling/) | Complete |
 | [Pump Scheduling](#pump-scheduling) | [examples/pump_scheduling/](examples/pump_scheduling/) | Scaffold |
 
+### Desalination Scheduling
+
+[examples/desalination_scheduling/](examples/desalination_scheduling/) — a seawater
+desalination plant with three parallel treatment trains, scheduled against a time-of-use
+tariff.
+
+```
+                   ┌─► pretreatment[0] ─► RO[0] ─┬─► brine ─► ocean
+seawater ─► intake ─┼─► pretreatment[1] ─► RO[1] ─┤        (permeate)
+             pump   └─► pretreatment[2] ─► RO[2] ─┘            │
+                                                               ▼
+  product water ◄─ product pump ◄─ post-treatment ◄─ permeate header
+```
+
+An intake pump feeds a header that splits across three constant-energy-intensity
+pretreatment units; each feeds its own reverse-osmosis skid, whose permeate recombines
+into a shared post-treatment step and a product water pump. Brine leaves each skid to the
+ocean outfall.
+
+The plant owes **265 acre-feet a month** of product water — a volume, not an hourly
+profile — and there is no storage in the flowsheet, so the only way to dodge an expensive
+hour is to make less water in it and more water elsewhere. The example solves a full
+calendar month at 15-minute resolution and compares a flat 24/7 baseline (an LP) against a
+schedule that turns RO skids down and off through the tariff peak (a MILP, via
+`flexops.logic.add_status`, `add_startup_shutdown` and `break_parallel_symmetry`).
+
+Restarting a skid is not free: for 45 minutes it runs at full power while its permeate is
+off-spec and diverted into the brine line. That, plus a narrow turndown band and a plant
+sized close to its obligation, is what makes the answer interesting — the headroom, not the
+tariff, is the binding constraint.
+
+Wiring lives in [model.py](examples/desalination_scheduling/model.py), which is the only
+place [config.json](examples/desalination_scheduling/config.json) keys are read — and
+every modeling decision is a config key, down to which optional `flexops.logic` pieces are
+attached, the solver and its MIP gap, and the reporting windows. Run `model.py` directly
+for a text summary, or open the notebook for the charts.
+
+### Pump Scheduling
+
+[examples/pump_scheduling/](examples/pump_scheduling/) — a two-pump water plant scheduling
+against a time-of-use tariff, framed as a flexibility-versus-storage trade-off.
 
 ## Getting Started
 
 The environment is defined in [environment.yml](environment.yml) and pins Python 3.13 plus
-`flex-pse[solvers]` from the upstream `main` branch.
+`flex-pse[solvers, dev]` from the upstream `main` branch.
 
 ```bash
 conda env create -f environment.yml
@@ -54,10 +94,17 @@ plain Python script:
 
 ```bash
 # read-only app view
-marimo run examples/pump_scheduling/notebook.py
+marimo run examples/desalination_scheduling/notebook.py
 
 # straight through, no UI
-python examples/pump_scheduling/notebook.py
+python examples/desalination_scheduling/notebook.py
+```
+
+An example whose model lives in its own `model.py` can also be run headless, for a text
+summary of every scenario without the charts:
+
+```bash
+python examples/desalination_scheduling/model.py
 ```
 
 ## Running the Tests
@@ -73,9 +120,12 @@ pytest
 ```
 .
 ├── conftest.py        # repository-wide pytest configuration
-├── environment.yml    # conda environment (Python + flex-pse[solvers])
+├── environment.yml    # conda environment (Python + flex-pse[solvers, dev])
 └── examples/
     ├── desalination_scheduling/
+    │   ├── config.json    # the problem instance
+    │   ├── model.py       # the only place config keys are read
+    │   └── notebook.py    # marimo walkthrough
     └── pump_scheduling/
 ```
 
@@ -84,9 +134,11 @@ pytest
 1. Create `examples/<example_name>/`.
 2. Add a `config.json` with at least a `name` and `description` field, alongside the
    parameters that define the problem instance.
-3. Add a `notebook.py` marimo notebook that reads the config, builds and solves the model,
+3. For anything beyond a couple of units, put the model wiring in a `model.py` beside it —
+   the notebook then reads as a walkthrough rather than as a build script.
+4. Add a `notebook.py` marimo notebook that reads the config, builds and solves the model,
    and presents the results.
-4. Add the example to the [table of contents](#table-of-contents) and the
+5. Add the example to the [table of contents](#table-of-contents) and the
    [examples table](#examples) above.
 
 ## License
