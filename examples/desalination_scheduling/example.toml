@@ -8,10 +8,9 @@ title = "Desalination scheduling"
 order = 20
 
 blurb = """
-A seawater plant with three parallel RO trains owes a fixed volume of product water over a \
-month — not an hourly profile — and has no storage, so its only lever is when to make it. \
-Sweeping that obligation upward from half the plant's capacity shows the schedule running out \
-of slack, and a restart penalty that bites well before the tariff does."""
+A seawater plant with three parallel reverse osmosis trains optimizes its flow and recovery to \
+meet a monthly water demand. This example shows how changing the monthly production requirement \
+drastically changes the system trajectory and unit cost ($/AF)."""
 
 tags = ["MIQCP", "unit commitment", "1 month @ 15 min", "Gurobi", "~27k binaries"]
 

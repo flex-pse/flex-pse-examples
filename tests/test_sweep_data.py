@@ -45,7 +45,7 @@ def test_manifest_is_valid(example_dir, discovered):
     "example_dir", example_dirs(), ids=lambda p: p.name
 )
 def test_committed_sweep_matches_the_contract(example_dir, discovered):
-    """The committed CSVs are present, parseable and internally consistent."""
+    """The committed Parquet is present, readable and internally consistent."""
     errors: list[str] = []
     build.validate_data(discovered[example_dir.name], errors)
     assert not errors, "\n".join(errors)
@@ -58,23 +58,53 @@ def test_sweep_summary_is_ordered_and_finite(example_dir, discovered):
     """Sweep ids run s00, s01, ... with no gaps, and no cost is NaN.
 
     A gap means a point failed to solve and the sweep was committed anyway; the
-    web notebook would then offer a case whose series file does not exist.
+    web notebook would then offer a case with no rows behind it.
     """
-    import pandas as pd
+    import duckdb
 
     example = discovered[example_dir.name]
-    path = example.data_dir / "summary.csv"
+    path = example.data_dir / "summary.parquet"
     if not path.exists():
         pytest.skip(
             f"no committed sweep; run `python tools/sweep.py examples/{example.name}`"
         )
-    summary = pd.read_csv(path)
+    summary = duckdb.sql(
+        f"SELECT * FROM read_parquet('{path}') ORDER BY sweep_id"
+    ).df()
 
     expected = [f"s{i:02d}" for i in range(len(summary))]
     assert list(summary["sweep_id"]) == expected, "sweep ids are not contiguous"
 
     for column in summary.select_dtypes("number").columns:
         assert summary[column].notna().all(), f"{column} has missing values"
+
+
+@pytest.mark.parametrize("example_dir", example_dirs(), ids=lambda p: p.name)
+def test_view_timestamps_are_typed(example_dir, discovered):
+    """A view's time column keeps its type through the file.
+
+    This is the thing Parquet buys that CSV could not promise: a `timestamp`
+    column arrives as a timestamp rather than as text a reader has to remember to
+    parse. If it ever regresses to a string the charts still draw, but the axis
+    silently becomes categorical.
+    """
+    import duckdb
+
+    example = discovered[example_dir.name]
+    for view in example.manifest.get("sweep", {}).get("views", []):
+        path = example.data_dir / f"{view['name']}.parquet"
+        if not path.exists():
+            pytest.skip("no committed sweep")
+        types = dict(
+            duckdb.sql(
+                f"DESCRIBE SELECT * FROM read_parquet('{path}')"
+            ).df()[["column_name", "column_type"]].values
+        )
+        assert "sweep_id" in types, f"{view['name']}.parquet has no sweep_id column"
+        if "timestamp" in types:
+            assert "TIMESTAMP" in types["timestamp"].upper(), (
+                f"{view['name']}.parquet: timestamp is {types['timestamp']}, not a timestamp"
+            )
 
 
 @pytest.mark.parametrize(

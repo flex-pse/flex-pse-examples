@@ -9,10 +9,9 @@ order = 10
 
 # Two sentences. The landing-page card is a card, not a page.
 blurb = """
-A two-pump water plant fills a tank against a time-of-use tariff while meeting a fixed \
-24-hour product demand, with a battery on site and the option to run the feed pump \
-flexibly or at constant duty. Sweeping the battery from nothing to full peak-load rating \
-at both strategies prices the trade-off directly: how much storage is flexibility worth?"""
+A two-pump water plant fills a tank and is subject to time-of-use tariffs. The example shows \
+how we might change the pump scheduling strategy and the sizing of a behind-the-meter battery \
+based on the size of the system and the net water demand."""
 
 tags = ["MILP", "storage vs flexibility", "24 h @ 1 h", "HiGHS"]
 

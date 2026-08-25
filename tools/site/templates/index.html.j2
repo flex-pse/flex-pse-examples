@@ -8,13 +8,26 @@
 <style>
 {{ inline_css }}
 </style>
+<script>
+  /* Stamp the saved theme before first paint so a returning dark-mode reader
+     never sees a white flash. Light is the default: the system preference is
+     deliberately not consulted. localStorage throws in some privacy contexts,
+     and the page must still render (light) when it does. */
+  try {
+    if (localStorage.getItem("theme") === "dark") {
+      document.documentElement.dataset.theme = "dark";
+    }
+  } catch (e) {}
+</script>
 </head>
 <body>
 
 <header class="masthead">
   <div class="wrap">
-    <p class="eyebrow">flex-pse</p>
-    <h1>Scheduling examples you can poke at</h1>
+    <div class="masthead-top">
+      <h1>Interactive process-scheduling examples</h1>
+      <button class="theme-toggle" type="button" hidden aria-pressed="false"></button>
+    </div>
     <p class="lede">
       A gallery of process-systems test problems built with
       <a href="https://github.com/flex-pse/flexPSE">flex-pse</a> — industrial plants
@@ -61,11 +74,6 @@
           sweep: the charts, tables and controls are live, but the schedules
           behind them were computed in advance.
         </p>
-        <p>
-          Each page says so at the top and links back to the model and the
-          solver-level notebook, which you can run yourself from the conda
-          environment in the repository.
-        </p>
       </div>
     </div>
   </div>
@@ -78,21 +86,10 @@
     <li class="card">
       <h3><a href="{{ example.page }}">{{ example.title }}</a></h3>
       <p class="blurb">{{ example.blurb }}</p>
-      <ul class="tags">
-        {% for tag in example.tags %}
-        <li>{{ tag }}</li>
-        {% endfor %}
-      </ul>
       <p class="actions">
         <a class="primary" href="{{ example.page }}">Explore &rarr;</a>
         <a href="{{ example.source_url }}">Model</a>
         <a href="{{ example.solver_url }}">Notebook</a>
-      </p>
-      <p class="meta">
-        {{ example.summary_rows }} solved case{{ '' if example.summary_rows == 1 else 's' }}
-        {% if example.provenance.get('solver') %}· {{ example.provenance['solver'] }}{% endif %}
-        {% if example.provenance.get('generated_utc') %}· solved {{ example.provenance['generated_utc'][:10] }}{% endif %}
-        {% if example.provenance.get('flexpse_commit') %}· flex-pse <code>{{ example.provenance['flexpse_commit'][:8] }}</code>{% endif %}
       </p>
     </li>
     {% endfor %}
@@ -118,6 +115,21 @@ marimo run examples/pump_scheduling/notebook.py</code></pre>
     <code>python tools/site/build.py --out _site</code>. Adding a new example is
     documented in <a href="{{ repo_url }}/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>.
   </p>
+
+  <div class="note">
+    <p>
+      <code>flex-pse</code> and this examples repository are maintained by the
+      Coherence Power team. For bug reports and feature requests please open
+      an issue on the <code>flex-pse</code> GitHub repository. To put up your
+      own example, see the
+      <a href="{{ repo_url }}/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a> file.
+    </p>
+    <p>
+      For support with custom analyses, please join our
+      <a href="https://join.slack.com/t/flex-pse/shared_invite/zt-47sl8mt9h-a0hWUUJlm73aj3uvJRi9hw">Slack Workspace</a>
+      or email <a href="mailto:info@coherencepower.com">info@coherencepower.com</a>.
+    </p>
+  </div>
 </section>
 
 </main>
@@ -129,6 +141,50 @@ marimo run examples/pump_scheduling/notebook.py</code></pre>
     network connection on first open.
   </p>
 </footer>
+
+<script>
+  /* The toggle is markup-hidden by default, so a reader without JS never sees a
+     dead control. */
+  (function () {
+    var root = document.documentElement;
+    var button = document.querySelector(".theme-toggle");
+    if (!button) return;
+
+    var ICONS = {
+      sun: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" ' +
+        'stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false">' +
+        '<circle cx="12" cy="12" r="4.2"/>' +
+        '<path d="M12 2v2.4M12 19.6V22M4.4 4.4l1.7 1.7M17.9 17.9l1.7 1.7M2 12h2.4M19.6 12H22M4.4 19.6l1.7-1.7M17.9 6.1l1.7-1.7"/>' +
+        '</svg>',
+      moon: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" ' +
+        'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+        '<path d="M20 14.1A8.5 8.5 0 1 1 9.9 4a6.8 6.8 0 0 0 10.1 10.1z"/>' +
+        '</svg>'
+    };
+
+    function paint() {
+      var dark = root.dataset.theme === "dark";
+      button.innerHTML = dark ? ICONS.moon : ICONS.sun;
+      button.setAttribute("aria-pressed", dark ? "true" : "false");
+      button.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
+    }
+
+    button.addEventListener("click", function () {
+      if (root.dataset.theme === "dark") {
+        delete root.dataset.theme;
+      } else {
+        root.dataset.theme = "dark";
+      }
+      try {
+        localStorage.setItem("theme", root.dataset.theme === "dark" ? "dark" : "light");
+      } catch (e) {}
+      paint();
+    });
+
+    button.hidden = false;
+    paint();
+  })();
+</script>
 
 </body>
 </html>

@@ -56,7 +56,7 @@ jobs:
       - name: Data contract and WASM safety
         run: |
           uv run --no-project --python 3.13 \
-            --with pytest --with 'pandas>=2' \
+            --with pytest --with 'pandas>=2' --with 'duckdb>=1.1' \
             pytest -q tests/test_sweep_data.py tests/test_wasm_notebooks.py
 
   # The slow gate: real models, real solves, against whatever flexPSE main is

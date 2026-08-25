@@ -89,21 +89,22 @@ REQUIRED_KEYS = (
 MAX_BLURB_CHARS = 360
 MAX_BLURB_SENTENCES = 2
 
-#: Columns `tools/sweep.py` guarantees in every `summary.csv`, and which the
+#: Columns `tools/sweep.py` guarantees in every `summary.parquet`, and which the
 #: landing page and the notebooks both read.
 REQUIRED_SUMMARY_COLUMNS = ("sweep_id", "label", "wall_seconds")
 
-#: Facts every `provenance.csv` must carry.
+#: Facts every `provenance.parquet` must carry.
 REQUIRED_PROVENANCE_KEYS = ("generated_utc", "generator", "flexpse_version", "solver")
 
 #: Top-level modules a WebAssembly notebook may import. Pyodide ships numpy,
-#: pandas, scipy and matplotlib; everything else here is stdlib that works under
-#: Emscripten. Anything outside this list either cannot be installed in a browser
+#: pandas, scipy, matplotlib and duckdb; everything else here is stdlib that
+#: works under Emscripten. Anything outside this list either cannot be installed in a browser
 #: at all (pyomo's solvers, flexops, idaes) or is a sibling module that will not
 #: be on the path in the export.
 ALLOWED_IMPORTS = frozenset(
     {
         "marimo", "numpy", "pandas", "matplotlib", "mpl_toolkits", "scipy",
+        "duckdb",
         "__future__", "abc", "base64", "collections", "dataclasses", "datetime",
         "decimal", "enum", "functools", "io", "itertools", "json", "math",
         "operator", "random", "re", "statistics", "string", "textwrap", "typing",
@@ -121,6 +122,7 @@ FORBIDDEN_ATTRS = {"sys.path", "Path(__file__)"}
 #: A view file past this is someone shipping a raw results frame. The browser
 #: fetches these synchronously on the worker thread, so it is a stall, not just
 #: a download. `tools/sweep.py` refuses to write one; this is the second gate.
+#: Generous: a reduced view is ~10 KB of Parquet.
 MAX_VIEW_BYTES = 2 * 1024 * 1024
 
 #: An export below this is truncated. A partial export otherwise passes silently.
@@ -284,81 +286,109 @@ def validate_manifest(example: Example, errors: list[str]) -> None:
 
 def validate_data(example: Example, errors: list[str]) -> None:
     """Check the committed sweep against the contract the notebooks read."""
-    import pandas as pd
+    import duckdb
 
     data = example.data_dir
     rel = _display(data)
 
-    summary_path = data / "summary.csv"
-    provenance_path = data / "provenance.csv"
+    summary_path = data / "summary.parquet"
+    provenance_path = data / "provenance.parquet"
 
     if not summary_path.exists():
         errors.append(
-            f"{example.name}: {rel}/summary.csv is missing. Generate it with "
+            f"{example.name}: {rel}/summary.parquet is missing. Generate it with "
             f"`python tools/sweep.py examples/{example.name}` and commit the result."
         )
         return
     if not provenance_path.exists():
-        errors.append(f"{example.name}: {rel}/provenance.csv is missing")
+        errors.append(f"{example.name}: {rel}/provenance.parquet is missing")
         return
 
+    con = duckdb.connect()
     try:
-        summary = pd.read_csv(summary_path)
-        provenance = pd.read_csv(provenance_path, index_col="key")["value"]
-    except Exception as exc:
-        errors.append(f"{example.name}: could not parse the sweep CSVs -- {exc}")
-        return
+        try:
+            summary = con.sql(f"SELECT * FROM read_parquet('{summary_path}')").df()
+            provenance = con.sql(
+                f"SELECT key, value FROM read_parquet('{provenance_path}')"
+            ).df().set_index("key")["value"]
+        except Exception as exc:
+            errors.append(f"{example.name}: could not read the sweep Parquet -- {exc}")
+            return
 
-    if summary.empty:
-        errors.append(f"{example.name}: {rel}/summary.csv has no rows")
-        return
+        if summary.empty:
+            errors.append(f"{example.name}: {rel}/summary.parquet has no rows")
+            return
 
-    axis = _dig(example.manifest, "sweep.axis")
-    for column in (*REQUIRED_SUMMARY_COLUMNS, axis):
-        if column not in summary.columns:
-            errors.append(f"{example.name}: summary.csv has no {column!r} column")
+        axis = _dig(example.manifest, "sweep.axis")
+        for column in (*REQUIRED_SUMMARY_COLUMNS, axis):
+            if column not in summary.columns:
+                errors.append(
+                    f"{example.name}: summary.parquet has no {column!r} column"
+                )
 
-    ids = summary.get("sweep_id")
-    if ids is not None:
-        if ids.duplicated().any():
-            errors.append(f"{example.name}: summary.csv has duplicate sweep_id values")
-        bad = [i for i in ids if not re.fullmatch(r"s\d{2,}", str(i))]
-        if bad:
-            errors.append(f"{example.name}: malformed sweep_id(s) {bad}")
+        ids = summary.get("sweep_id")
+        if ids is not None:
+            if ids.duplicated().any():
+                errors.append(
+                    f"{example.name}: summary.parquet has duplicate sweep_id values"
+                )
+            bad = [i for i in ids if not re.fullmatch(r"s\d{2,}", str(i))]
+            if bad:
+                errors.append(f"{example.name}: malformed sweep_id(s) {bad}")
 
-    for key in REQUIRED_PROVENANCE_KEYS:
-        if key not in provenance.index:
-            errors.append(f"{example.name}: provenance.csv has no {key!r} row")
+        for key in REQUIRED_PROVENANCE_KEYS:
+            if key not in provenance.index:
+                errors.append(f"{example.name}: provenance.parquet has no {key!r} row")
 
-    if str(provenance.get("smoke", "no")) == "yes":
-        errors.append(
-            f"{example.name}: the committed sweep is marked as a reduced (smoke) "
-            f"run. Regenerate it without --smoke before publishing."
-        )
-
-    # Every point needs a file in every view, and every file needs a point --
-    # the second half catches orphans left behind when a sweep shrinks.
-    expected = set(map(str, ids)) if ids is not None else set()
-    for view in example.manifest.get("sweep", {}).get("views", []):
-        view_dir = data / view["name"]
-        if not view_dir.is_dir():
-            errors.append(f"{example.name}: view directory {rel}/{view['name']}/ missing")
-            continue
-        present = {p.stem for p in view_dir.glob("*.csv")}
-        for missing in sorted(expected - present):
-            errors.append(f"{example.name}: {view['name']}/{missing}.csv missing")
-        for orphan in sorted(present - expected):
+        if str(provenance.get("smoke", "no")) == "yes":
             errors.append(
-                f"{example.name}: {view['name']}/{orphan}.csv has no row in "
-                f"summary.csv -- a leftover from a shorter sweep?"
+                f"{example.name}: the committed sweep is marked as a reduced (smoke) "
+                f"run. Regenerate it without --smoke before publishing."
             )
-        for path in sorted(view_dir.glob("*.csv")):
+
+        # Each view must cover exactly the points summary.parquet lists. A missing
+        # sweep_id is a point whose data never got written; an extra one is a
+        # leftover from a longer sweep, and would show the reader a case the
+        # selector cannot reach.
+        expected = set(map(str, ids)) if ids is not None else set()
+        for view in example.manifest.get("sweep", {}).get("views", []):
+            path = data / f"{view['name']}.parquet"
+            if not path.exists():
+                errors.append(f"{example.name}: {rel}/{view['name']}.parquet is missing")
+                continue
+            try:
+                present = {
+                    str(row[0])
+                    for row in con.sql(
+                        f"SELECT DISTINCT sweep_id FROM read_parquet('{path}')"
+                    ).fetchall()
+                }
+            except Exception as exc:
+                errors.append(
+                    f"{example.name}: could not read {view['name']}.parquet -- {exc}"
+                )
+                continue
+
+            for missing in sorted(expected - present):
+                errors.append(
+                    f"{example.name}: {view['name']}.parquet has no rows for "
+                    f"{missing} -- that point's data was never written"
+                )
+            for orphan in sorted(present - expected):
+                errors.append(
+                    f"{example.name}: {view['name']}.parquet has rows for {orphan}, "
+                    f"which has no row in summary.parquet -- a leftover from a "
+                    f"longer sweep?"
+                )
+
             size = path.stat().st_size
             if size > MAX_VIEW_BYTES:
                 errors.append(
-                    f"{example.name}: {path.relative_to(data)} is {size / 1e6:.1f} MB, "
+                    f"{example.name}: {view['name']}.parquet is {size / 1e6:.1f} MB, "
                     f"over the {MAX_VIEW_BYTES / 1e6:.0f} MB view limit"
                 )
+    finally:
+        con.close()
 
     example.provenance = {k: str(v) for k, v in provenance.items()}
     example.summary_rows = len(summary)
@@ -398,7 +428,7 @@ def validate_wasm(example: Example, errors: list[str]) -> None:
                 errors.append(
                     f"{where}:{node.lineno}: `{func.id}()` cannot work under "
                     f"Pyodide -- mo.notebook_location() is a URL in the browser, "
-                    f"not a path. Read the file with pandas instead."
+                    f"not a path. Query it with duckdb.sql(read_parquet(...)) instead."
                 )
             if isinstance(func, ast.Attribute) and func.attr == "insert":
                 target = ast.unparse(func.value)
@@ -550,7 +580,7 @@ def verify(examples: list[Example], out_dir: Path, errors: list[str]) -> None:
                 f"{example.name}: {example.page} is only "
                 f"{page.stat().st_size} bytes -- a truncated export"
             )
-        data = notebooks / "public" / example.name / "summary.csv"
+        data = notebooks / "public" / example.name / "summary.parquet"
         if not data.exists():
             errors.append(
                 f"{example.name}: {data.relative_to(out_dir)} missing -- the "

@@ -117,18 +117,27 @@ def test_smoke_sweep_runs_and_writes_the_contract(tmp_path):
     committed one, so CI can exercise the whole generation path without ever
     proposing a change to published data.
     """
+    import duckdb
+
     from tools import sweep
 
     out = sweep.run(EXAMPLE, smoke=True, out_dir=tmp_path)
 
-    summary = out / "summary.csv"
-    assert summary.exists() and summary.stat().st_size > 0
-    assert (out / "provenance.csv").exists()
+    summary_path = out / "summary.parquet"
+    assert summary_path.exists() and summary_path.stat().st_size > 0
+    assert (out / "provenance.parquet").exists()
 
-    import pandas as pd
-
-    frame = pd.read_csv(summary)
+    frame = duckdb.sql(f"SELECT * FROM read_parquet('{summary_path}')").df()
     assert len(frame) == 4, "the reduced sweep is the config's 2x2"
     assert set(frame["strategy"]) == {"flexible", "inflexible"}
-    for sweep_id in frame["sweep_id"]:
-        assert (out / "series" / f"{sweep_id}.csv").exists()
+
+    # Every point in the summary has rows in the view, and nothing else does.
+    series_path = out / "series.parquet"
+    assert series_path.exists()
+    in_series = {
+        row[0]
+        for row in duckdb.sql(
+            f"SELECT DISTINCT sweep_id FROM read_parquet('{series_path}')"
+        ).fetchall()
+    }
+    assert in_series == set(frame["sweep_id"])

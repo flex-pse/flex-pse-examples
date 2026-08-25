@@ -1,38 +1,47 @@
 /* flex-pse examples: the landing page.
-   Self-contained on purpose -- no CDN, no webfont, no JS. Every colour is a
-   token defined on :root and redefined once for dark, so the page follows the
-   reader's system theme without a toggle. */
+   Self-contained on purpose -- no CDN, no webfont, one inline script for the
+   theme toggle. Every colour is a token defined on :root and redefined once
+   under [data-theme="dark"]. Light is the default for everyone: the page does
+   not read prefers-color-scheme, it reads the reader's explicit choice. */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
-  --bg:        #fbfaf7;
+  --bg:        #f1f2f3;
   --bg-raised: #ffffff;
-  --bg-sunken: #f2efe8;
-  --ink:       #1d1c19;
-  --ink-muted: #5d594f;
-  --ink-faint: #8b8578;
-  --rule:      #e0dccf;
-  --accent:    #2f6f8f;
-  --accent-ink:#245674;
-  --warm:      #b3543f;
-  --shadow:    0 1px 2px rgba(29, 28, 25, .05), 0 4px 14px rgba(29, 28, 25, .05);
+  --bg-sunken: #e8eaec;
+  --ink:       #33383b;
+  --ink-muted: #5c6367;
+  --ink-faint: #868d92;
+  --rule:      #dcdfe2;
+  --accent:    #24688c;
+  --accent-ink:#1a4d6b;
+  --on-accent: #ffffff;
+  --shadow:    0 1px 2px rgba(29, 33, 36, .05), 0 4px 14px rgba(29, 33, 36, .06);
+
+  /* The masthead band is charcoal in both themes, after the deck's title
+     slides, so its tokens are declared once and never flipped. */
+  --band:        #3d4145;
+  --band-ink:    #ffffff;
+  --band-muted:  #c3c8cb;
+  --band-accent: #45c6de;
+  --band-rule:   rgba(255, 255, 255, .35);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg:        #14161a;
-    --bg-raised: #1c1f25;
-    --bg-sunken: #101215;
-    --ink:       #e8e6e1;
-    --ink-muted: #a8a49b;
-    --ink-faint: #7b776e;
-    --rule:      #2b2f37;
-    --accent:    #7fb4d0;
-    --accent-ink:#a6cfe4;
-    --warm:      #d98a72;
-    --shadow:    0 1px 2px rgba(0, 0, 0, .3), 0 4px 16px rgba(0, 0, 0, .25);
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg:        #2b2e31;
+  --bg-raised: #34383b;
+  --bg-sunken: #26292b;
+  --ink:       #e9ebec;
+  --ink-muted: #b0b6b9;
+  --ink-faint: #878d91;
+  --rule:      #43484c;
+  --accent:    #45c6de;
+  --accent-ink:#6fd6e9;
+  --on-accent: #12262e;
+  --shadow:    0 1px 2px rgba(0, 0, 0, .3), 0 4px 16px rgba(0, 0, 0, .25);
 }
 
 * { box-sizing: border-box; }
@@ -48,8 +57,8 @@ body {
 
 .wrap { max-width: 62rem; margin: 0 auto; padding: 0 1.5rem; }
 
-a { color: var(--accent-ink); text-decoration-thickness: 1px; text-underline-offset: 2px; }
-a:hover { color: var(--warm); }
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:hover { color: var(--accent-ink); }
 
 code {
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
@@ -72,18 +81,18 @@ pre code { background: none; padding: 0; font-size: .85rem; }
 /* ---------------------------------------------------------------- masthead */
 
 .masthead {
-  background: var(--bg-raised);
+  position: relative;
+  background: var(--band);
+  color: var(--band-ink);
   border-bottom: 1px solid var(--rule);
-  padding: 3.5rem 0 2.75rem;
+  padding: 3rem 0 2.75rem;
 }
 
-.eyebrow {
-  margin: 0 0 .5rem;
-  font-size: .75rem;
-  font-weight: 600;
-  letter-spacing: .14em;
-  text-transform: uppercase;
-  color: var(--warm);
+.masthead-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
 }
 
 .masthead h1 {
@@ -97,8 +106,11 @@ pre code { background: none; padding: 0; font-size: .85rem; }
   margin: 0;
   max-width: 44rem;
   font-size: 1.1rem;
-  color: var(--ink-muted);
+  color: var(--band-muted);
 }
+
+.masthead a { color: var(--band-accent); }
+.masthead a:hover { color: var(--band-ink); }
 
 .masthead-links {
   margin: 1.5rem 0 0;
@@ -107,6 +119,25 @@ pre code { background: none; padding: 0; font-size: .85rem; }
   gap: 1.25rem;
   font-size: .9rem;
 }
+
+.theme-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  margin-top: .35rem;
+  color: var(--band-ink);
+  background: none;
+  border: 1px solid var(--band-rule);
+  border-radius: 999px;
+  padding: 0;
+  cursor: pointer;
+}
+.theme-toggle:hover { border-color: var(--band-accent); color: var(--band-accent); }
+.theme-toggle:focus-visible { outline: 2px solid var(--band-accent); outline-offset: 2px; }
+.theme-toggle[hidden] { display: none; }
 
 /* ---------------------------------------------------------------- sections */
 
@@ -138,11 +169,11 @@ p { margin: 0 0 1rem; }
 .note {
   background: var(--bg-raised);
   border: 1px solid var(--rule);
-  border-left: 3px solid var(--warm);
+  border-left: 3px solid var(--accent);
   border-radius: 8px;
   padding: 1.15rem 1.25rem .25rem;
 }
-.note h3 { color: var(--warm); font-size: .95rem; }
+.note h3 { color: var(--accent); font-size: .95rem; }
 .note p { font-size: .925rem; color: var(--ink-muted); }
 
 /* ------------------------------------------------------------------- cards */
@@ -165,36 +196,17 @@ p { margin: 0 0 1rem; }
   background: var(--bg-raised);
   border: 1px solid var(--rule);
   border-radius: 10px;
-  padding: 1.35rem 1.4rem 1.1rem;
+  padding: 1.35rem 1.4rem;
   box-shadow: var(--shadow);
 }
 
 .card h3 a { text-decoration: none; color: var(--ink); }
-.card h3 a:hover { color: var(--accent-ink); }
+.card h3 a:hover { color: var(--accent); }
 
 .blurb { color: var(--ink-muted); font-size: .95rem; flex: 1; }
 
-.tags {
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: .4rem;
-  margin: 0 0 1rem;
-  padding: 0;
-}
-.tags li {
-  font-size: .72rem;
-  letter-spacing: .02em;
-  color: var(--ink-muted);
-  background: var(--bg-sunken);
-  border: 1px solid var(--rule);
-  border-radius: 999px;
-  padding: .15rem .6rem;
-  white-space: nowrap;
-}
-
 .actions {
-  margin: 0 0 .75rem;
+  margin: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -205,25 +217,12 @@ p { margin: 0 0 1rem; }
 .actions .primary {
   text-decoration: none;
   font-weight: 600;
-  color: #fff;
+  color: var(--on-accent);
   background: var(--accent);
   padding: .4rem .85rem;
   border-radius: 6px;
 }
-.actions .primary:hover { background: var(--accent-ink); color: #fff; }
-@media (prefers-color-scheme: dark) {
-  .actions .primary { color: #10141a; }
-  .actions .primary:hover { color: #10141a; }
-}
-
-.meta {
-  margin: 0;
-  padding-top: .75rem;
-  border-top: 1px solid var(--rule);
-  font-size: .78rem;
-  color: var(--ink-faint);
-}
-.meta code { background: none; padding: 0; }
+.actions .primary:hover { background: var(--accent-ink); color: var(--on-accent); }
 
 /* ------------------------------------------------------------------ footer */
 

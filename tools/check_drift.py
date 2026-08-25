@@ -43,18 +43,24 @@ def compare(example_dir: Path, *, rtol: float) -> list[str]:
     Returns:
         A list of human-readable differences; empty means the sweep reproduces.
     """
+    import duckdb
     import numpy as np
     import pandas as pd
 
     from tools import sweep
 
-    committed_path = example_dir / "public" / example_dir.name / "summary.csv"
+    committed_path = example_dir / "public" / example_dir.name / "summary.parquet"
     if not committed_path.exists():
         return [f"{committed_path} does not exist -- nothing to compare against"]
-    committed = pd.read_csv(committed_path)
 
+    def _read(path: Path):
+        return duckdb.sql(
+            f"SELECT * FROM read_parquet('{path}') ORDER BY sweep_id"
+        ).df()
+
+    committed = _read(committed_path)
     with tempfile.TemporaryDirectory() as tmp:
-        fresh = pd.read_csv(sweep.run(example_dir, out_dir=Path(tmp)) / "summary.csv")
+        fresh = _read(sweep.run(example_dir, out_dir=Path(tmp)) / "summary.parquet")
 
     problems: list[str] = []
 
@@ -66,7 +72,7 @@ def compare(example_dir: Path, *, rtol: float) -> list[str]:
 
     missing = set(committed.columns) - set(fresh.columns) - VOLATILE
     if missing:
-        problems.append(f"columns disappeared from summary.csv: {sorted(missing)}")
+        problems.append(f"columns disappeared from summary.parquet: {sorted(missing)}")
 
     for column in sorted(set(committed.columns) & set(fresh.columns) - VOLATILE):
         old, new = committed[column], fresh[column]

@@ -1,13 +1,13 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["marimo", "pandas", "numpy", "matplotlib"]
+# dependencies = ["marimo", "pandas", "numpy", "matplotlib", "duckdb"]
 # ///
 """Pump scheduling: the WebAssembly page.
 
 This notebook ships to the browser, so it may import nothing that Pyodide cannot
 install -- no pyomo, no flexops, no sibling `model`. It reads the sweep that
 `tools/sweep.py` solved offline and committed under `public/`, and everything it
-draws is pandas and matplotlib over those CSVs.
+draws is DuckDB, pandas and matplotlib over those Parquet files.
 
 `tools/site/build.py` enforces that with an import allowlist; see CONTRIBUTING.md.
 """
@@ -20,11 +20,11 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
+    import duckdb
     import marimo as mo
     import matplotlib.dates as mdates
     import matplotlib.pyplot as plt
     import numpy as np
-    import pandas as pd
 
     #: Where `tools/sweep.py` wrote this example's data. `mo.notebook_location()`
     #: is the directory holding the notebook when run locally and the directory
@@ -33,7 +33,7 @@ def _():
     #: single directory in the export -- the inner folder is what keeps them apart.
     EXAMPLE = "pump_scheduling"
     DATA = f"{mo.notebook_location()}/public/{EXAMPLE}"
-    return DATA, EXAMPLE, mdates, mo, np, pd, plt
+    return DATA, EXAMPLE, duckdb, mdates, mo, np, plt
 
 
 @app.cell
@@ -81,13 +81,26 @@ def _(EXAMPLE, mo):
 
 
 @app.cell
-def _(DATA, mo, pd):
-    # A failed fetch here is the most likely way this page breaks in a browser
-    # (a stale export, a moved file, an offline visitor). Say so in the page
-    # rather than dropping a traceback on a reader who cannot act on it.
+def _(DATA, duckdb, mo):
+    # DuckDB reads the Parquet straight from the URL. Under WebAssembly marimo
+    # intercepts the remote scan, fetches the bytes and hands them back through a
+    # replacement scan -- DuckDB-WASM has no httpfs of its own -- so this query
+    # runs unchanged here and in the browser.
+    #
+    # A failed fetch is the most likely way this page breaks in a browser (a
+    # stale export, a moved file, an offline visitor). Say so in the page rather
+    # than dropping a traceback on a reader who cannot act on it.
     try:
-        summary = pd.read_csv(f"{DATA}/summary.csv")
-        provenance = pd.read_csv(f"{DATA}/provenance.csv", index_col="key")["value"]
+        summary = duckdb.sql(
+            f"SELECT * FROM read_parquet('{DATA}/summary.parquet') ORDER BY sweep_id"
+        ).df()
+        provenance = (
+            duckdb.sql(
+                f"SELECT key, value FROM read_parquet('{DATA}/provenance.parquet')"
+            )
+            .df()
+            .set_index("key")["value"]
+        )
         load_error = None
     except Exception as exc:
         summary, provenance, load_error = None, None, exc
@@ -245,14 +258,19 @@ def _(mo, summary):
 
 
 @app.cell
-def _(DATA, case, mo, pd):
+def _(DATA, case, duckdb, mo):
     mo.stop(case.value is None, mo.md("*Pick a case above.*"))
-    # One small file per point, fetched on selection rather than up front: in the
-    # browser this is a synchronous request on the worker thread, so loading all
-    # twelve at boot would stall the page for no benefit.
-    schedule = pd.read_csv(
-        f"{DATA}/series/{case.value}.csv", parse_dates=["timestamp"], index_col="timestamp"
-    )
+    # Every case lives in one Parquet file, so selecting one is a filter rather
+    # than another fetch -- and `timestamp` arrives as a timestamp, with no
+    # parse_dates to get wrong.
+    schedule = duckdb.sql(
+        f"""
+        SELECT * EXCLUDE (sweep_id)
+        FROM read_parquet('{DATA}/series.parquet')
+        WHERE sweep_id = '{case.value}'
+        ORDER BY timestamp
+        """
+    ).df().set_index("timestamp")
     return (schedule,)
 
 

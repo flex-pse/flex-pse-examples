@@ -7,4 +7,5 @@ dependencies:
   - pip:
       - flex-pse[solvers, dev] @ git+https://github.com/flex-pse/flexPSE.git@main
       - marimo
+      - duckdb
       - matplotlib

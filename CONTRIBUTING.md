@@ -19,9 +19,9 @@ So each example has two notebooks and a script between them:
 | `sweep.py` | your machine, and CI | An adapter that solves the model at each point of one sweep. |
 | `explore.py` | **a browser** | Replays the committed sweep. May import almost nothing. |
 
-`tools/sweep.py` drives `sweep.py` and writes CSVs into `public/<name>/`, which
-are **committed to the repository**. `explore.py` reads them. The website build
-never solves anything.
+`tools/sweep.py` drives `sweep.py` and writes Parquet into `public/<name>/`, which
+is **committed to the repository**. `explore.py` reads it with DuckDB. The website
+build never solves anything.
 
 ## The layout
 
@@ -34,9 +34,9 @@ examples/<name>/
     sweep.py              the sweep adapter
     explore.py            the WebAssembly page
     public/<name>/        generated, and committed
-        provenance.csv
-        summary.csv
-        series/sNN.csv
+        provenance.parquet    key/value facts about the run
+        summary.parquet       one row per sweep point
+        series.parquet        every point's rows, keyed by sweep_id
 ```
 
 The doubled `public/<name>/` is not a typo. Every example's `public/` folder is
@@ -96,6 +96,17 @@ for a horizon short enough to draw whole. A month at 15-minute resolution is
 see, and the browser fetches these files *synchronously*, so it is a stall as
 well as a download. The build refuses any view file over 2 MB.
 
+Each view becomes **one** Parquet file holding every sweep point, keyed by
+`sweep_id` — so a reader selecting a case filters data already in the browser
+instead of triggering another fetch.
+
+> **Why Parquet and not a `.duckdb` file.** DuckDB is what *reads* this data, but
+> its database format allocates in fixed 256 KB blocks: the desalination sweep is
+> 17 KB across four Parquet files and 1.3 MB inside a single `.duckdb` — 75× the
+> size, opaque to every other tool, and tied to a storage version. Parquet also
+> stays on the path marimo's WebAssembly layer actually supports; it intercepts
+> remote `read_parquet` scans, but not `ATTACH` of a remote database.
+
 **7. Commit `public/<name>/`.**
 → *The build fails without `summary.csv`, and fails if the committed sweep is
 marked as a reduced `--smoke` run.*
@@ -103,8 +114,9 @@ marked as a reduced `--smoke` run.*
 **8. Add `explore.py`**, the page. It must:
 
 - start with a PEP 723 header naming its dependencies;
-- import only from the allowlist — `marimo`, `numpy`, `pandas`, `matplotlib`,
-  `scipy` and safe stdlib. No `pyomo`, no `flexops`, no sibling `model`;
+- import only from the allowlist — `marimo`, `duckdb`, `numpy`, `pandas`,
+  `matplotlib`, `scipy` and safe stdlib. No `pyomo`, no `flexops`, no sibling
+  `model`;
 - read its data through `mo.notebook_location()`, never `open()` or
   `Path(__file__)` — in the browser that location is a *URL*;
 - open with the precomputed-results callout (copy an existing one), so no reader
@@ -185,6 +197,11 @@ Regenerate a sweep whenever the model behind it changes. Nothing will remind you
   paints immediately; `--no-execute` is the escape hatch if that ever breaks.
 - **Never `import model` in a test.** See step 9 — `conftest.load_example_module`
   exists because every example's model module is called the same thing.
+- **DuckDB is in Pyodide, but check before assuming.** It was dropped from
+  Pyodide 0.28–0.29 over an ABI issue and restored under the newer
+  CPython-aligned versions. marimo 0.24 pins Pyodide 314.0.0, which ships duckdb
+  1.5.1 — see `marimo/_pyodide/pyodide_constraints.py` for the pin. A `0.2x` lock
+  file will tell you the opposite.
 - **matplotlib is `agg`-only** in the browser. Return the `Figure` from a cell
   rather than calling `plt.show()`, and keep box-drawing characters out of chart
   labels — DejaVu Sans has no glyphs for them.

@@ -31,9 +31,23 @@ The output layout, which :mod:`tools.site.build` validates and the WebAssembly
 notebooks read::
 
     examples/<name>/public/<name>/
-        provenance.csv     # key,value -- one row per fact about the run
-        summary.csv        # one row per sweep point
-        <view>/sNN.csv     # one file per point per view, wide: timestamp x column
+        provenance.parquet   # key/value -- one row per fact about the run
+        summary.parquet      # one row per sweep point
+        <view>.parquet       # every point's rows for that view, keyed by sweep_id
+
+Parquet, and one file per *view* rather than one per point. Pyodide ships DuckDB,
+so the notebooks query these with SQL rather than parsing text, which buys three
+things CSV could not: the whole sweep arrives in one fetch per view instead of one
+per selection (the browser fetches synchronously on its worker thread, so that is
+a stall, not just a download); ``timestamp`` stays a timestamp; and the files are
+about a ninth of the size -- the desalination sweep is 17 KB across four Parquet
+files against 162 KB across sixteen CSVs.
+
+Parquet *files*, though, not a DuckDB database file. DuckDB's storage allocates in
+fixed 256 KB blocks, so that same sweep costs 1.3 MB inside a ``.duckdb`` -- 75x the
+Parquet -- and it would be opaque to every other tool, at a storage version that has
+to match. Nothing is lost by keeping the container plain: DuckDB is still what reads
+them.
 """
 
 from __future__ import annotations
@@ -66,18 +80,15 @@ def _display(path: Path) -> str:
         return str(path)
 
 
-#: Written into every float in every view file. Five significant figures is well
-#: past solver tolerance and roughly halves the committed CSV against repr().
-FLOAT_FORMAT = "%.5g"
-
-#: ISO 8601 without a timezone -- the horizons are naive local plant time, and a
-#: "+00:00" suffix would claim a UTC they are not in.
-DATE_FORMAT = "%Y-%m-%dT%H:%M:%S"
+#: Parquet codec. zstd is the best-compressing codec Pyodide's DuckDB reads
+#: without an extension, and this data is repetitive enough to care.
+COMPRESSION = "ZSTD"
 
 #: A view file above this is a sign someone is dumping a raw results frame
-#: rather than a reduced view; the browser pays for it on every selection.
-#: ``tools/site/build.py`` refuses to publish one, so fail here first, where the
-#: person who can fix it is still watching.
+#: rather than a reduced view. The browser fetches it synchronously on the worker
+#: thread, so it is a stall as well as a download. ``tools/site/build.py``
+#: refuses to publish one, so fail here first, where the person who can fix it is
+#: still watching. Generous: a reduced view is ~10 KB.
 MAX_VIEW_BYTES = 2 * 1024 * 1024
 
 
@@ -327,10 +338,10 @@ def _git(*args: str) -> str:
 
 
 def build_provenance(rows: list[dict], *, smoke: bool, wall: float) -> dict[str, str]:
-    """Return the run-level facts written to ``provenance.csv``."""
+    """Return the run-level facts written to ``provenance.parquet``."""
     solvers = sorted({str(r.get("solver", "")) for r in rows} - {""})
     return {
-        "generated_utc": datetime.now(timezone.utc).strftime(DATE_FORMAT + "Z"),
+        "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "generator": "tools/sweep.py",
         "examples_commit": _git("rev-parse", "HEAD"),
         "examples_dirty": "yes" if _git("status", "--porcelain") else "no",
@@ -344,7 +355,7 @@ def build_provenance(rows: list[dict], *, smoke: bool, wall: float) -> dict[str,
         "notes": (
             "REDUCED INSTANCE -- not the published sweep"
             if smoke
-            else "Solved at full size; see summary.csv for the per-point gap."
+            else "Solved at full size; see summary.parquet for the per-point gap."
         ),
     }
 
@@ -360,7 +371,7 @@ def run(example_dir: Path, *, smoke: bool = False, out_dir: Path | None = None) 
         example_dir: An example directory under ``examples/``.
         smoke: Pass ``smoke=True`` through to the adapter, which is expected to
             shrink the instance to something a CI runner can finish. The output
-            is marked as reduced in ``provenance.csv`` so it can never be
+            is marked as reduced in ``provenance.parquet`` so it can never be
             mistaken for a publishable sweep.
         out_dir: Override the output directory. Defaults to the
             ``public/<name>/`` the WebAssembly notebook reads.
@@ -372,6 +383,7 @@ def run(example_dir: Path, *, smoke: bool = False, out_dir: Path | None = None) 
         ValueError: If the adapter returns no points, or a view file exceeds
             :data:`MAX_VIEW_BYTES`.
     """
+    import duckdb
     import pandas as pd
 
     example_dir = example_dir.resolve()
@@ -393,8 +405,9 @@ def run(example_dir: Path, *, smoke: bool = False, out_dir: Path | None = None) 
     print(f"{name}: {label} over {len(points)} point(s) of {axis!r}", flush=True)
 
     out.mkdir(parents=True, exist_ok=True)
-    for view in views:
-        (out / view["name"]).mkdir(parents=True, exist_ok=True)
+    # One file per view holding every point, so views accumulate here rather than
+    # being written per point. The whole sweep is a couple of thousand rows.
+    collected: dict[str, list] = {view["name"]: [] for view in views}
 
     started = perf_counter()
     ctx = adapter.setup(smoke=smoke)
@@ -407,17 +420,12 @@ def run(example_dir: Path, *, smoke: bool = False, out_dir: Path | None = None) 
         elapsed = perf_counter() - t0
 
         for view in views:
-            path = out / view["name"] / f"{sweep_id}.csv"
-            reduce_view(frame, view, columns).to_csv(
-                path, float_format=FLOAT_FORMAT, date_format=DATE_FORMAT
-            )
-            if path.stat().st_size > MAX_VIEW_BYTES:
-                raise ValueError(
-                    f"{_display(path)} is "
-                    f"{path.stat().st_size / 1e6:.1f} MB, over the "
-                    f"{MAX_VIEW_BYTES / 1e6:.0f} MB view limit. Reduce it with a "
-                    f"narrower [[sweep.views]] or a shorter sweep.columns."
-                )
+            # `sweep_id` first, and the view's own index promoted to a real
+            # column: Parquet has no index concept, and the notebooks filter on
+            # `sweep_id` and order by whatever the index was.
+            reduced = reduce_view(frame, view, columns).reset_index()
+            reduced.insert(0, "sweep_id", sweep_id)
+            collected[view["name"]].append(reduced)
 
         rows.append(
             {
@@ -433,12 +441,39 @@ def run(example_dir: Path, *, smoke: bool = False, out_dir: Path | None = None) 
         )
 
     wall = perf_counter() - started
-    pd.DataFrame(rows).to_csv(out / "summary.csv", index=False, float_format="%.6g")
-    pd.Series(build_provenance(rows, smoke=smoke, wall=wall)).rename_axis(
-        "key"
-    ).rename("value").to_csv(out / "provenance.csv")
 
-    total = sum(p.stat().st_size for p in out.rglob("*.csv"))
+    provenance = pd.DataFrame(
+        build_provenance(rows, smoke=smoke, wall=wall).items(),
+        columns=["key", "value"],
+    )
+    tables = {
+        "summary": pd.DataFrame(rows),
+        "provenance": provenance,
+        **{name: pd.concat(parts, ignore_index=True) for name, parts in collected.items()},
+    }
+
+    # DuckDB writes the Parquet, so this needs no pyarrow -- which matters,
+    # because pandas' own `to_parquet` has no engine without it and pyarrow is a
+    # heavy dependency to add for four small files.
+    con = duckdb.connect()
+    try:
+        for table, frame_out in tables.items():
+            path = out / f"{table}.parquet"
+            con.register("_frame", frame_out)
+            con.execute(
+                f"COPY _frame TO '{path}' (FORMAT PARQUET, COMPRESSION {COMPRESSION})"
+            )
+            con.unregister("_frame")
+            if table in collected and path.stat().st_size > MAX_VIEW_BYTES:
+                raise ValueError(
+                    f"{_display(path)} is {path.stat().st_size / 1e6:.1f} MB, over "
+                    f"the {MAX_VIEW_BYTES / 1e6:.0f} MB view limit. Reduce it with a "
+                    f"narrower [[sweep.views]] or a shorter sweep.columns."
+                )
+    finally:
+        con.close()
+
+    total = sum(p.stat().st_size for p in out.glob("*.parquet"))
     print(
         f"{name}: wrote {len(rows)} point(s) to "
         f"{_display(out)} ({total / 1024:.0f} KB) in {wall:.1f}s",
