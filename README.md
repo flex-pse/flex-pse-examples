@@ -48,23 +48,40 @@ pretreatment units; each feeds its own reverse-osmosis skid, whose permeate reco
 into a shared post-treatment step and a product water pump. Brine leaves each skid to the
 ocean outfall.
 
-The plant owes **265 acre-feet a month** of product water — a volume, not an hourly
-profile — and there is no storage in the flowsheet, so the only way to dodge an expensive
-hour is to make less water in it and more water elsewhere. The example solves a full
-calendar month at 15-minute resolution and compares a flat 24/7 baseline (an LP) against a
-schedule that turns RO skids down and off through the tariff peak (a MILP, via
-`flexops.logic.add_status`, `add_startup_shutdown` and `break_parallel_symmetry`).
+The plant owes a **volume** of product water over the month — 265 acre-feet by default, not
+an hourly profile — and there is no storage in the flowsheet, so the only way to dodge an
+expensive hour is to make less water in it and more water elsewhere. The example solves a
+full calendar month at 15-minute resolution as a unit-commitment problem: each RO skid is
+off, or running inside its turndown band, via `flexops.logic.add_status`,
+`add_startup_shutdown` and `register_parallel_group`.
 
-Restarting a skid is not free: for 45 minutes it runs at full power while its permeate is
-off-spec and diverted into the brine line. That, plus a narrow turndown band and a plant
-sized close to its obligation, is what makes the answer interesting — the headroom, not the
+Stepping the train count down from three to two is free; restarting the RO *system* is
+not. For 45 minutes afterwards post-treatment is out, and every train's permeate — not
+just the restarting one's — leaves off-spec to the outfall while the plant pays full power
+to make it. That, plus a narrow turndown band and — at the default demand — a plant sized
+close to its obligation, is what makes the answer interesting: the headroom, not the
 tariff, is the binding constraint.
 
-Wiring lives in [model.py](examples/desalination_scheduling/model.py), which is the only
-place [config.json](examples/desalination_scheduling/config.json) keys are read — and
-every modeling decision is a config key, down to which optional `flexops.logic` pieces are
-attached, the solver and its MIP gap, and the reporting windows. Run `model.py` directly
-for a text summary, or open the notebook for the charts.
+That obligation is the notebook's one knob. It is a slider on the notebook page, and it
+enters the model as a mutable `Param`, so the month is built once and each new demand
+costs only a re-solve. How much slack the schedule has is entirely a function of where the
+demand sits against `model.max_product_af()` — the ~284 acre-feet three skids at rated
+feed make if they never stop. Near the ceiling the plant runs flat out and there is
+nothing to schedule; well below it, the optimizer can afford to sit out the whole peak
+window.
+
+The month carries ~27,000 binaries and does not solve to optimality in a sitting, so the
+notebook defaults to the LP relaxation (`flexops.logic.relax`), which solves in well under
+a minute. The relaxation is optimistic — a fractional status runs a skid below its
+turndown floor and pays only a fraction of a restart — so read its cost as a **lower
+bound**, and flip the switch off for the exact MILP when a runnable schedule is what is
+wanted.
+
+The flowsheet is written in code in [model.py](examples/desalination_scheduling/model.py);
+[config.json](examples/desalination_scheduling/config.json) supplies the one piece with no
+code form yet, the EECO tariff. The solver and its options are `SOLVER` and `SOLVER_OPTIONS`
+in `model.py`. Run `model.py` directly for a text
+summary, or open the notebook for the slider and the charts.
 
 ### Pump Scheduling
 

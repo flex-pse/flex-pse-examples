@@ -28,14 +28,30 @@ whatever passes through it. The RO skids are constant intensity, which may
 be replaced by a custom surrogate *and* a split: ``permeate == recovery * feed``,
 brine takes the rest.
 
-The **RO bypass** is what lets the intake pump and pretreatment keep flowing
-while a skid is down: with the skid off its ``feed`` is pinned to zero by its
-status binary, so every drop the train still pretreats has to leave through the
-bypass. It is an open tee, not gated on status, so a skid running turned down
-can bypass part of its feed too. Bypassed water earns nothing and still pays
-intake + pretreatment energy, so at the flow floors shipped here (``0 m^3/hr``
-for both always-on units) the optimizer leaves the bypass shut; it starts
-carrying water as soon as either unit is given a real turndown floor.
+The intake pump is **fixed duty**: 1063.5 m^3/hr of seawater every step, no
+turndown, whatever the skids are doing. Three skids at rated feed can swallow
+only 1013.01 of that, so the plant always lifts and pretreats at least 50.49
+m^3/hr more than its membranes can take, and far more with a skid down. How the
+feed header splits that flow across the trains is *not* pinned -- only mass
+conservation is -- but an even third is what a solved model reports, since it is
+the split that lets all three skids run at rated feed.
+
+The **RO bypass** is where the surplus goes, and it is what lets the intake pump
+and pretreatment keep flowing while a skid is down: with the skid off its
+``feed`` is pinned to zero by its status binary, so every drop that train
+pretreats leaves through the bypass. It is an open tee, not gated on status, so
+a running skid bypasses its surplus the same way. Bypassed water earns nothing
+and still pays intake + pretreatment energy; with the intake fixed that energy
+is a constant the schedule cannot dodge, so it shifts the whole bill up rather
+than changing where the cheap hours are.
+
+The plant has **three operating states, not four**: all three trains, two
+trains, or down. A single skid running is not a state it has -- the shared
+post-treatment step and product pump cannot be turned down to one train's
+permeate -- so ``ro[0]`` and ``ro[1]`` are pinned together as a lead pair and
+``ro[2]`` is the one that swings. The only two moves the schedule can make are
+therefore *shut one skid* and *shut the system*, which is what the solved
+``trains_online`` steps between.
 
 Recuperation is a **plant-level** outage, not a per-skid one. ``post_treatment``
 may only run while ``ro[0]`` is online and at least 45 minutes past its restart;
@@ -46,14 +62,47 @@ every train's, not just the restarting one's -- goes to the outfall off-spec.
 Stepping the train count down from three to two therefore costs nothing; only a
 full system restart does.
 
-The plant owes **265 acre-feet a month** of product water, and nothing says 
-*when*. That is the whole degree of freedom: with no product storage anywhere 
-in the flowsheet, the only way to dodge an expensive tariff hour is to make less 
-water in it and more water elsewhere.
+The lead pair is what makes that penalty bite. Left free, a lone ``ro[0]`` is a
+loophole: the cheapest way through a 45-minute window is to restart the one skid
+the constraint watches, spill only its third of the permeate, and bring the
+other two up on the step post-treatment returns. Pinning ``ro[1]`` to it means a
+restart carries two trains through the window at full power for nothing, which
+is what a restart actually costs.
+
+The plant owes a **fixed volume of product water over the horizon** -- 265
+acre-feet by default -- and nothing says *when*. That is the whole degree of
+freedom: with no product storage anywhere in the flowsheet, the only way to dodge
+an expensive tariff hour is to make less water in it and more water elsewhere.
+
+That obligation is the model's one free knob. :func:`main` takes it as
+``demand_af``, and it lands in the model as a **mutable** ``Param``, so
+:func:`set_demand` can retarget it and the model can be re-solved without being
+rebuilt -- which is how the notebook's demand slider works. How much slack the
+schedule has is entirely a function of where it sits against
+:func:`max_product_af`, the most the three skids can deliver if they run at rated
+feed for the whole horizon: near that ceiling the plant has to run flat out and
+there is nothing to schedule, and the further below it the demand sits, the more
+of the peak window the optimizer can afford to sit out.
+
+The objective is the in-model operating cost and nothing else. What makes the
+month tractable is not a term in it but *how it is solved*:
+:func:`solve_relax_and_fix` solves the integrality-relaxed model first, takes
+every status the relaxation already decided -- within :data:`FIX_TOL` of 0 or 1
+-- as a decision and fixes it there, restores integrality, and re-solves as a
+MIP over the statuses that came back genuinely fractional. Those are the steps
+where the plant is actually choosing; the rest were never a search. It is a
+heuristic and says so: the relaxed objective is a valid lower bound, so
+``m.relaxation_gap`` bounds how far the schedule it returns can be from optimal.
+
+The objective is still not the bill, though it was never the bill: the in-model
+cost is a relaxed, scalarized proxy the solver can optimize over, and the
+month's actual cost is :func:`report_cost` -- the solved dispatch handed back to
+EECO after the fact.
 
 """
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 import pyomo.environ as pyo
@@ -68,58 +117,196 @@ from flexops.logic import (
     add_status,
     register_parallel_group,
     relax,
+    unrelax,
 )
 from flexops.properties.simple_aqueous import SimpleAqueousFlow
 from flexops.unit_models import ConstantEnergyIntensityModel, Pump, ReverseOsmosis
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
 
-#: Product water owed per month, measured downstream of the product pump. The
-#: horizon below is exactly one calendar month, so this is the horizon's
-#: obligation as it stands -- no proration.
+#: The scheduling horizon, module-level because the demand ceiling is a rate
+#: times its length: exactly one calendar month at 15-minute resolution. The step
+#: is 15 minutes rather than an hour because the 45-minute recuperation delay has
+#: to land on a whole number of steps, and because 15 minutes divides the
+#: tariff's 16:00 and 21:00 boundaries exactly.
+START_DATE = "2026-07-01"
+END_DATE = "2026-08-01"
+TIME_STEP_HR = 0.25
+HORIZON_HOURS = (
+    datetime.fromisoformat(END_DATE) - datetime.fromisoformat(START_DATE)
+).total_seconds() / 3600.0
+
+#: Product water owed over the horizon, measured downstream of the product pump.
+#: A default, not a constant: :func:`main` takes ``demand_af``, and
+#: :func:`set_demand` retargets it on a model already built. The horizon is
+#: exactly one calendar month, so this is the month's obligation as it stands --
+#: no proration.
 DEMAND_AF_PER_MONTH = 265.0
+
+#: How close to an integer a relaxed status has to land before
+#: :func:`solve_relax_and_fix` takes it as a decision rather than a search: a
+#: status below ``FIX_TOL`` is fixed off, one above ``1 - FIX_TOL`` is fixed on,
+#: and everything between is handed to the MIP as a free binary.
+#:
+#: It is the routine's one knob, and it trades tractability against optimality.
+#: At 0 nothing is fixed and the routine *is* the exact MILP -- the relaxation
+#: becomes a wasted solve that buys only the bound. Turn it up and more of the
+#: month is decided by an LP that is allowed to run a skid at 0.87 of rated feed,
+#: which the plant cannot; the schedule it hands down is feasible (the MIP still
+#: has to satisfy every constraint around what was fixed) but it can be dearer
+#: than the optimum, and ``m.relaxation_gap`` is what says by how much. Past
+#: ~0.4 fixing starts to cut off every feasible schedule outright, which is what
+#: the tolerance ladder in :func:`solve_relax_and_fix` is there to survive.
+FIX_TOL = 0.1
 
 #: The plant's sizing, module-level because the charts need it too: ``min_feed``
 #: in particular is not recoverable from a solved model -- it goes in as a bound
 #: inside ``add_status`` and is not a variable anywhere afterwards.
 N_TRAINS = 3
+#: Water recovery is a **degree of freedom**, not a plant constant: each skid's
+#: ``recovery`` Var is unfixed in :func:`construct_plant` and the optimizer picks
+#: it anywhere in ``[RECOVERY_MIN, RECOVERY_MAX]``. ``RECOVERY`` is only the
+#: starting point the Var is initialized at -- the nominal seawater figure -- and
+#: is what the *reporting* helpers that need a nominal number still quote.
+#: Anything that is a **ceiling** (the header's status cap, the delivery ceiling,
+#: the "full tilt" reference line) reads ``RECOVERY_MAX`` instead, or it would
+#: bind before the optimizer ever got to the top of the window.
 RECOVERY = 0.465
+RECOVERY_MIN = 0.4
+RECOVERY_MAX = 0.5
 RATED_FEED_M3_PER_HR = 337.67  # m3/hr of feed, per skid
 MIN_FEED_M3_PER_HR = 337.67  # m3/hr; below this a skid must shut off entirely
 RECUP_STEPS = 3  # 45 min of off-spec permeate after a startup, at 15-min steps
 
+#: The intake pump is a fixed-duty machine: one speed, no throttling, so the
+#: plant lifts the same seawater every step whatever the skids are doing. It is
+#: *fixed*, not bounded -- ``feed_m3_per_hr`` is a flat line in the results
+#: frame, and the intake + pretreatment power it costs is a constant the
+#: schedule cannot dodge. It sits above what the membranes can swallow (three
+#: skids at rated feed take 1013.01), so 50.49 m^3/hr goes to the outfall
+#: through the RO bypass even at full tilt.
+INTAKE_FLOW_M3_PER_HR = 1063.5
+
 _M3_HR = pyunits.m**3 / pyunits.hr
 _KWH_M3 = pyunits.kWh / pyunits.m**3
+
+#: One acre-foot in m^3. The demand is quoted in acre-feet because that is how a
+#: water contract is written; every flow in the flowsheet is metric.
+M3_PER_AF = pyo.value(
+    pyunits.convert(1 * pyunits.acre * pyunits.foot, pyunits.m**3)
+)
 
 #: Flows and draws below this read as zero. A MILP solver returns an idle train
 #: as a few nanolitres either side of nothing, and a negative flow plots as a
 #: notch below the axis.
 _FLOW_TOL_M3_HR = 1e-6
 
-def main(relax_integrality: bool = False):
+#: Which solver :func:`solve_model` asks for first. ``get_solver`` takes this as
+#: ``prefer`` and uses it whenever that solver is installed and can take the
+#: problem class; otherwise it warns and falls through its own priority list
+#: (``gurobi``, ``scip``, ``highs``, ``cbc``, ``ipopt``). HiGHS is the default
+#: because it ships with ``flex-pse[solvers]`` and needs no license.
+SOLVER = "gurobi"
+
+#: Solver options, keyed by the solver's own name for its own option spellings
+#: -- they are not translated anywhere, and a solver rejects a name it does not
+#: know (Gurobi raises outright on HiGHS's ``mip_rel_gap``). :func:`solve_model`
+#: looks these up under the solver ``get_solver`` *returned*, not the one asked
+#: for, so a fallback still gets options it understands. A solver with no entry
+#: here runs on its defaults: no gap, no time limit.
+#:
+#: ``mip_rel_gap``/``MIPGap`` ends the branch and bound once the incumbent is
+#: provably within that fraction of optimal, which is what keeps a month of unit
+#: commitment tractable; the time limit is the backstop, and a run that hits it
+#: is reported rather than silently accepted.
+#:
+#: 0.2%, not the usual 1%. The gap is not just a cost tolerance here -- it is a
+#: tolerance on the *schedule*, and a whole recuperation window is small against
+#: the month's bill. At 1% the exact month came back holding post-treatment out
+#: for 2h15m after a restart rather than the 45 minutes the constraint requires:
+#: feasible, within tolerance, and wrong on the one behaviour the example exists
+#: to show. At 0.2% the window is exactly three steps and the month still solves
+#: in well under a minute.
+#:
+#: ``NonConvex=2`` is what an unfixed recovery costs: the split
+#: ``permeate[t] == recovery * feed[t]`` is bilinear, so the month is a
+#: non-convex MIQCP and Gurobi has to run spatial branch and bound over it.
+#: Gurobi's default (``NonConvex=-1``) already does this; it is set explicitly
+#: so a run that gets slow points at its own cause. HiGHS cannot take the
+#: problem at all -- see :func:`_register_gurobi_for_quadratics`.
+SOLVER_OPTIONS = {
+    "highs": {"mip_rel_gap": 0.002, "time_limit": 1800},
+    "gurobi": {"MIPGap": 0.002, "TimeLimit": 1800, "NonConvex": 2},
+}
+
+
+def _register_gurobi_for_quadratics() -> None:
+    """Teach flex-pse's solver registry that Gurobi can take this model.
+
+    Unfixing recovery makes ``permeate[t] == recovery * feed[t]`` bilinear, and
+    flex-pse classifies *any* nonlinear constraint as ``NLP``/``MINLP`` --
+    quadratic included, since ``QP`` there means a quadratic *objective* only.
+    So the exact model is ``MINLP`` and the relaxation, whose binaries are gone,
+    is ``NLP``. The shipped ``CAPABILITIES`` lists Gurobi for ``LP``/``QP``/
+    ``MILP``, so ``get_solver`` passes over an installed Gurobi on both: with no
+    SCIP here the exact model raises outright, and the relaxation silently falls
+    through to IPOPT.
+
+    That IPOPT fallback is the worse of the two. IPOPT is a *local* solver, and
+    a relaxation that is only locally optimal is not a lower bound on the exact
+    cost -- which is the one thing :func:`main`'s ``relax_integrality`` promises.
+
+    Gurobi solves non-convex QCP and MIQCP by spatial branch and bound (what
+    ``NonConvex=2`` above asks for), so the registry entry is what is wrong here,
+    not the routing; ``CAPABILITIES`` is documented as the extension point for
+    exactly this. Idempotent, and a no-op if a future flex-pse ships the entries
+    itself.
+    """
+    from flexcore.solvers.classify import ProblemClass
+    from flexcore.solvers.registry import CAPABILITIES
+
+    CAPABILITIES.setdefault("gurobi", set()).update(
+        {ProblemClass.NLP, ProblemClass.MINLP}
+    )
+
+def main(
+    relax_integrality: bool = False,
+    demand_af: float = DEMAND_AF_PER_MONTH,
+):
     """Build the desalination scheduling model, ready to solve.
 
     Args:
         relax_integrality: ``True`` to drop the RO skids' ``status``, ``startup``
             and ``shutdown`` -- and post-treatment's ``status`` -- from
-            ``Binary`` to ``UnitInterval``. The month carries ~27k binaries and
-            does not solve in a sitting; the relaxation solves in seconds, but
-            it is **optimistic** -- a fractional status runs a skid below its
-            turndown floor, and a fractional ``ro[0]`` startup lets
-            post-treatment stay fractionally online through the recuperation
-            window instead of paying for all of it. Read its cost as a lower
-            bound.
+            ``Binary`` to ``UnitInterval``, and leave them there. The month
+            carries ~27k binaries; the relaxation solves in seconds, but it is
+            **optimistic** -- a fractional status runs a skid below its turndown
+            floor, and a fractional ``ro[0]`` startup lets post-treatment stay
+            fractionally online through the recuperation window instead of
+            paying for all of it. Read its cost as a lower bound and its
+            schedule as no schedule at all. It is a comparison case, not the way
+            to make the exact month tractable -- that is
+            :func:`solve_relax_and_fix`, which relaxes and restores integrality
+            inside a single solve and is what a model built with the default
+            wants.
+        demand_af: Product water owed over the horizon, in acre-feet. Has to sit
+            under :func:`max_product_af` or the model is infeasible. It goes in
+            as a mutable ``Param``, so a *different* demand needs only
+            :func:`set_demand` and another solve, not another build.
 
     Returns:
         A ``pyo.ConcreteModel`` with the plant, the product-delivery
-        obligation, and ``objective`` (the horizon operating cost).
+        obligation, and ``objective`` (the in-model operating cost -- a solve
+        target, not a bill; :func:`report_cost` is the bill). The obligation is
+        on ``m.demand_volume`` (a mutable ``Param``, m^3) and ``m.demand_af``
+        (the acre-feet it was set from).
     """
     m = pyo.ConcreteModel(name="desalination_example")
 
     m.time_block = TimeBlock(
-        start_date= "2026-07-01",
-        end_date= "2026-08-01",
-        time_step= 0.25 * pyunits.hr,
+        start_date=START_DATE,
+        end_date=END_DATE,
+        time_step=TIME_STEP_HR * pyunits.hr,
     )
     m.properties = SimpleAqueousFlow()
     # The tariff is the one piece with no code form yet -- it is ~80 EECO rate
@@ -132,38 +319,128 @@ def main(relax_integrality: bool = False):
 
     # Applied after the plant is wired so it catches every binary the logic
     # pieces attached. Domain-only: constraints, bounds and fixed values are
-    # untouched, so the always-on units stay pinned at 1.
+    # untouched, so the always-on units stay pinned at 1 -- which is why
+    # logic_units can sweep the whole plant rather than naming the RO skids and
+    # post-treatment, and is the same sweep solve_relax_and_fix makes.
     m.is_relaxed = bool(relax_integrality)
     if m.is_relaxed:
-        for i in m.plant.trains:
-            relax(m.plant.ro[i])
-        # Post-treatment's status is a free binary too -- one per time step, so
-        # leaving it out would keep 2976 of them and the relaxation would no
-        # longer solve in seconds.
-        relax(m.plant.post_treatment)
+        for unit in logic_units(m.plant):
+            relax(unit)
 
-    add_demand_and_objective(m)
+    add_demand_and_objective(m, demand_af)
 
     return m
 
 
-def demand_m3() -> float:
-    """The horizon's product-water obligation in m^3.
+def demand_m3(demand_af: float = DEMAND_AF_PER_MONTH) -> float:
+    """Convert a product-water obligation from acre-feet to m^3.
 
-    The horizon is exactly one calendar month, so this is
-    :data:`DEMAND_AF_PER_MONTH` converted straight across -- no proration.
+    The horizon is exactly one calendar month, so an obligation quoted per month
+    converts straight across -- no proration.
     """
-    return pyo.value(
-        pyunits.convert(
-            DEMAND_AF_PER_MONTH * pyunits.acre * pyunits.foot, pyunits.m**3
-        )
+    return float(demand_af) * M3_PER_AF
+
+
+def max_product_af() -> float:
+    """The most product water the plant could deliver over the horizon, in AF.
+
+    Every skid at rated feed *and at the top of its recovery window* for every
+    step of the horizon, and never a restart to spill permeate off-spec. Any
+    ``demand_af`` has to sit under this or the model is infeasible, and how far
+    under is exactly how much slack the schedule has: at the ceiling the plant
+    runs flat out and there is nothing to schedule.
+
+    ``RECOVERY_MAX``, not the nominal ``RECOVERY``: recovery is a degree of
+    freedom, so a demand between the two is deliverable and quoting the nominal
+    figure would call it infeasible.
+    """
+    return (
+        N_TRAINS * RATED_FEED_M3_PER_HR * RECOVERY_MAX * HORIZON_HOURS / M3_PER_AF
     )
 
 
-def add_demand_and_objective(m):
-    """Attach the monthly water obligation and the operating-cost objective."""
+def set_demand(m, demand_af: float) -> float:
+    """Retarget the horizon's product-water obligation on a built model.
+
+    The obligation is a mutable ``Param``, so this is all that stands between
+    one demand and the next: no constraint in the flowsheet changes, only the
+    number on the right-hand side of ``product_delivery``, and the model is ready
+    to re-solve. That is what the notebook's demand slider moves -- the month is
+    built once and each new demand pays for its solve alone.
+
+    Args:
+        m: A model from :func:`main`, solved or not.
+        demand_af: The new obligation in acre-feet. Above
+            :func:`max_product_af` the model becomes infeasible; nothing here
+            checks, because the solver's report is the honest answer.
+
+    Returns:
+        The new obligation in m^3.
+    """
+    m.demand_af = float(demand_af)
+    m.demand_volume.set_value(demand_m3(m.demand_af))
+    return pyo.value(m.demand_volume)
+
+
+def logic_units(plant):
+    """Yield every unit block in the flowsheet carrying flex-pse logic binaries.
+
+    Walks the plant rather than naming the units, so a unit added to
+    :func:`construct_plant` later is relaxed and restored without a second edit
+    here. ``status`` is the marker because ``add_status`` is the base piece
+    every other one hangs off, and ``relax``/``unrelax`` work off the unit's own
+    registry of tracked binaries -- so one call per unit covers its ``status``,
+    ``startup`` and ``shutdown`` together.
+
+    The always-on units come back too. Their statuses are *fixed* at 1, and
+    ``relax`` is domain-only, so relaxing them is a no-op rather than a hole in
+    the plant.
+    """
+    for unit in plant.component_data_objects(pyo.Block, descend_into=True):
+        if unit.component("status") is not None:
+            yield unit
+
+
+def status_vars(plant):
+    """Yield every status variable in the flowsheet that is still a decision.
+
+    The set :func:`solve_relax_and_fix` reads off the relaxation and fixes.
+    Statuses only -- ``startup`` and ``shutdown`` follow from them through the
+    constraints ``add_startup_shutdown`` attached, so fixing a status decides
+    its startup too.
+
+    The always-on units' statuses are **fixed at 1** by :func:`construct_plant`
+    and are skipped: they were never a decision. Anything the routine itself
+    fixed is skipped for the same reason, which is why it keeps its own list of
+    those and releases them before it reads this again.
+    """
+    for unit in plant.component_data_objects(pyo.Block, descend_into=True):
+        status = unit.component("status")
+        if status is None:
+            continue
+        for datum in status.values():
+            if not datum.fixed:
+                yield datum
+
+
+def add_demand_and_objective(m, demand_af: float = DEMAND_AF_PER_MONTH):
+    """Attach the horizon's water obligation and the objective the solver minimizes.
+
+    The objective is the in-model operating cost, which is a solve target and
+    not a statement about money -- see :func:`report_cost`.
+    """
     tb = m.time_block
     plant = m.plant
+
+    # Mutable, so set_demand can retarget the obligation without rebuilding the
+    # month. It is the model's one free parameter: everything else here is plant.
+    m.demand_af = float(demand_af)
+    m.demand_volume = pyo.Param(
+        initialize=demand_m3(m.demand_af),
+        mutable=True,
+        units=pyunits.m**3,
+        doc="Product water owed over the horizon.",
+    )
 
     dt_hours = pyo.value(pyunits.convert(tb.dt, pyunits.hr))
     # TODO(#67) - replace this constraint with plant.add_product_demand once
@@ -175,13 +452,18 @@ def add_demand_and_objective(m):
         )
         * dt_hours
         * pyunits.hr
-        >= demand_m3() * pyunits.m**3,
-        doc="Deliver at least the month's obligation, measured downstream of "
+        >= m.demand_volume,
+        doc="Deliver at least the horizon's obligation, measured downstream of "
         "the product pump. A volume, not a profile -- placing it in the "
         "cheap hours is the whole degree of freedom.",
     )
 
     m.costing.cost_process()
+
+    # The operating cost and nothing else. It is not a dollar figure anyone
+    # should quote -- it is the relaxed, scalarized proxy the solver can
+    # optimize over, and the bill is report_cost. What keeps the month
+    # tractable is solve_relax_and_fix, not a term added here.
     m.objective = pyo.Objective(
         expr=m.costing.aggregate_operating_cost, sense=pyo.minimize
     )
@@ -189,28 +471,32 @@ def add_demand_and_objective(m):
 
 
 def solve_model(m, prefer: str | None = None):
-    """Solve ``m`` with the solver and options from ``config.json``.
+    """Solve ``m`` with :data:`SOLVER` and the matching :data:`SOLVER_OPTIONS`.
 
     Records the achieved relative MIP gap on ``m.mip_gap`` and snaps power
     noise to exactly zero -- a MILP solver returns an idle plant as a few
     nanowatts either side, and EECO refuses to bill a negative draw.
 
-    Unlike ``model.solve_model``, a run that stops on the time limit is
-    returned rather than raised on: the exact MILP here is expected to hit it,
-    and the caller reports the termination condition and the gap.
+    A run that stops on the time limit is returned rather than raised on: the
+    exact MILP is expected to hit it, and the caller reports the termination
+    condition and the gap.
 
     Args:
         m: A model from :func:`main`.
-        prefer: Overrides ``solver.prefer`` from the config.
+        prefer: Overrides :data:`SOLVER` for this solve. ``get_solver`` honours
+            it only if that solver is installed and can take the problem class;
+            otherwise it warns and falls through its own priority list.
 
     Returns:
         The Pyomo results object.
     """
     from flexcore.solvers import get_solver
 
-    solver_cfg = json.loads(CONFIG_PATH.read_text())["solver"]
-    solver = get_solver(model=m, prefer=prefer or solver_cfg["prefer"])
-    results = solver.solve(m, options=dict(solver_cfg["options"]))
+    _register_gurobi_for_quadratics()
+    solver = get_solver(model=m, prefer=prefer or SOLVER)
+    # Keyed on what came back, not on what was asked for: the options are the
+    # solver's own spellings, and a fallback would choke on another's.
+    results = solver.solve(m, options=dict(SOLVER_OPTIONS.get(solver.name, {})))
 
     problem = results.problem
     lower, upper = problem.lower_bound, problem.upper_bound
@@ -224,6 +510,175 @@ def solve_model(m, prefer: str | None = None):
         if entry.value is not None and abs(entry.value) < 1e-6:
             entry.set_value(0.0, skip_validation=True)
     return results
+
+
+#: Termination conditions the fixing ladder in :func:`solve_relax_and_fix`
+#: reads as "these fixes cut off every schedule". ``infeasibleOrUnbounded`` is
+#: in here because a presolve that folds the two cannot tell them apart, and
+#: this model is bounded below by construction.
+_INFEASIBLE = frozenset(
+    {
+        pyo.TerminationCondition.infeasible,
+        pyo.TerminationCondition.infeasibleOrUnbounded,
+    }
+)
+
+
+def solve_relax_and_fix(m, *, tol: float = FIX_TOL, prefer: str | None = None):
+    """Solve the month by relaxing, fixing what the relaxation decided, re-solving.
+
+    The exact month is ~27k binaries and the schedule the plant actually has is
+    made of long flat runs, so most of those binaries are not a decision anyone
+    is making -- they are a search the solver has to close anyway. This routine
+    lets the relaxation say which:
+
+    1. Relax every logic binary to ``UnitInterval`` and solve. The relaxed
+       objective is a **valid lower bound** on the exact one, and it is kept on
+       ``m.relaxed_objective`` for exactly that reason.
+    2. Fix every status the relaxation already decided -- below ``tol``, or
+       above ``1 - tol`` -- at that integer. Statuses only: ``startup`` and
+       ``shutdown`` follow from them through their own constraints.
+    3. Restore integrality and re-solve as a MIP over what is left, which is the
+       genuinely fractional statuses -- the steps where the LP is trading a
+       fraction of a train against the tariff and the plant has to pick a side.
+
+    It is a heuristic, and the honest number for it is ``m.relaxation_gap``, not
+    ``m.mip_gap``: the final solve's gap is the gap of the *fixed* subproblem and
+    says nothing at all about the statuses that were fixed before it started.
+    The gap against the relaxation's bound covers both.
+
+    **The fixing ladder.** Fixing can cut off every feasible schedule -- pin
+    post-treatment on at a step and ``post_treatment_recuperation`` forces
+    ``ro[0]`` on there *and* forbids a restart in the preceding 45 minutes, which
+    may be the only way the month meets its demand. So an infeasible re-solve is
+    not an answer here; it steps the tolerance down (``tol``, ``tol/2``,
+    ``tol/4``, then 0) and fixes again from the same relaxed values, handing
+    more of the decision back to the solver each time. The last rung fixes
+    nothing and *is* the exact MILP, so the ladder always ends somewhere honest.
+    Every rung tried is recorded on ``m.fix_attempts``.
+
+    Args:
+        m: A model from :func:`main`, built exact. A model built with
+            ``relax_integrality=True`` is the LP comparison case and is
+            rejected: this routine would hand it back with its integrality
+            restored, which is not the model that was asked for.
+        tol: Distance from an integer within which a relaxed status is taken as
+            decided. See :data:`FIX_TOL`. ``0`` fixes nothing, which makes this
+            the exact MILP with a lower bound computed first.
+        prefer: Passed to :func:`solve_model` for both solves.
+
+    Returns:
+        The Pyomo results object of the solve that produced the returned
+        schedule. Alongside it, on the model:
+
+        * ``m.relaxed_objective`` -- the relaxation's cost, a lower bound.
+        * ``m.relaxation_gap`` -- how far the returned schedule sits above it.
+        * ``m.fix_tol`` -- the rung that produced the answer, which is ``tol``
+          unless the ladder had to step down.
+        * ``m.statuses_fixed`` / ``m.statuses_free`` -- how much of the month
+          the relaxation decided and how much went to the MIP.
+        * ``m.fix_attempts`` -- ``(tol, fixed, termination)`` per rung tried.
+
+    Raises:
+        ValueError: If ``m`` was built with ``relax_integrality=True``.
+    """
+    if m.is_relaxed:
+        raise ValueError(
+            "solve_relax_and_fix needs a model built exact -- it relaxes and "
+            "restores integrality itself. This model came from "
+            "main(relax_integrality=True), which is the LP comparison case; "
+            "solve it with solve_model, or rebuild it with main()."
+        )
+
+    # Release what an earlier call fixed. Without this a second solve at a new
+    # demand would inherit the first one's schedule as hard constraints --
+    # status_vars skips fixed data, so they would not even show up as decisions
+    # to reconsider.
+    for datum in getattr(m, "fixed_statuses", ()):
+        datum.unfix()
+
+    units = list(logic_units(m.plant))
+    for unit in units:
+        relax(unit)
+    m.is_relaxed = True
+    relaxed_results = solve_model(m, prefer=prefer)
+    m.relaxed_objective = pyo.value(m.objective)
+    # Snapshot rather than read the Vars again later: the solves below overwrite
+    # them, and every rung of the ladder fixes from the same relaxed answer.
+    relaxed_statuses = [(datum, pyo.value(datum)) for datum in status_vars(m.plant)]
+
+    for unit in units:
+        unrelax(unit)
+    m.is_relaxed = False
+
+    if relaxed_results.solver.termination_condition in _INFEASIBLE:
+        # No bound and nothing to fix. The exact model is infeasible too -- the
+        # relaxation is a superset of it -- so this is the answer, and a demand
+        # above max_product_af is the usual reason.
+        m.relaxed_objective = None
+        m.relaxation_gap = None
+        m.fix_tol = None
+        m.fixed_statuses = []
+        m.statuses_fixed, m.statuses_free = 0, len(relaxed_statuses)
+        m.fix_attempts = []
+        return relaxed_results
+
+    ladder = [tol, tol / 2, tol / 4, 0.0]
+    m.fix_attempts = []
+    results = relaxed_results  # rebound on the first rung; the ladder is never empty
+    for rung, rung_tol in enumerate(ladder):
+        for datum in getattr(m, "fixed_statuses", ()):
+            datum.unfix()
+        fixed = []
+        # Strict, so the last rung fixes nothing rather than pinning every
+        # status that landed exactly on an integer.
+        for datum, value in relaxed_statuses:
+            if value < rung_tol:
+                datum.fix(0)
+            elif value > 1 - rung_tol:
+                datum.fix(1)
+            else:
+                continue
+            fixed.append(datum)
+        m.fixed_statuses = fixed
+
+        results = solve_model(m, prefer=prefer)
+        condition = results.solver.termination_condition
+        m.fix_attempts.append((rung_tol, len(fixed), condition))
+        if condition not in _INFEASIBLE or rung == len(ladder) - 1:
+            break
+
+    m.fix_tol, m.statuses_fixed, _ = m.fix_attempts[-1]
+    m.statuses_free = len(relaxed_statuses) - m.statuses_fixed
+    objective = pyo.value(m.objective)
+    m.relaxation_gap = (
+        abs(objective - m.relaxed_objective) / abs(objective) if objective else 0.0
+    )
+    return results
+
+
+def report_cost(m):
+    """Return the month's bill: an EECO evaluation of the realized dispatch.
+
+    **This, and not the objective, is the cost.** ``m.objective`` is what the
+    solver can optimize over: the tariff's pricing non-convexity has to be
+    relaxed and scalarized to stay in a MILP, and the demand charge in
+    particular is a proration, not a meter read.
+
+    ``FlexCosting.report_cost`` recomputes the cost from scratch by handing the
+    solved aggregate power profile back to EECO. Once the dispatch is fixed the
+    non-convexity is harmless, so the evaluation is exact.
+
+    Args:
+        m: A solved model from :func:`main`.
+
+    Returns:
+        A ``flexops.costing.CostReport``. ``report.operating.electricity`` is
+        the EECO electricity bill, ``report.operating.total`` the operating
+        total, and ``report.currency`` names the currency they are magnitudes
+        in.
+    """
+    return m.costing.report_cost(m)
 
 def construct_plant(m):
 
@@ -240,6 +695,7 @@ def construct_plant(m):
     rated_feed = RATED_FEED_M3_PER_HR
     min_feed = MIN_FEED_M3_PER_HR
     recup_steps = RECUP_STEPS
+    intake_flow = INTAKE_FLOW_M3_PER_HR
 
     plant.intake_pump = Pump(
         property_package=m.properties,
@@ -255,16 +711,40 @@ def construct_plant(m):
         costing_package=m.costing,
     )
     
+    # TODO - replace this with a custom surrogate and defined based on a per unit of permeate basis.
     plant.ro = ReverseOsmosis(
         plant.trains,
         property_package=m.properties,
         recovery=recovery,
-        recovery_min=0.4,
-        recovery_max=0.5,
-        energy_intensity=3.34 * _KWH_M3,
+        recovery_min=RECOVERY_MIN,
+        recovery_max=RECOVERY_MAX,
+        energy_intensity=3.34 * 0.465 * _KWH_M3,
         costing_package=m.costing,
     )
-    
+
+    # Recovery is a degree of freedom, not a plant constant. flex-pse builds a
+    # process parameter as a scalar Var *fixed* at its configured value, exactly
+    # so it can be unfixed in place; unfixing it here hands the optimizer the
+    # membrane window, with the configured RECOVERY left behind as the starting
+    # point. One value per skid for the whole horizon -- the Var is scalar, not
+    # time-indexed -- so this is a design choice the schedule is solved around,
+    # not a knob that moves step to step.
+    #
+    # It costs the model its problem class: ``permeate[t] == recovery * feed[t]``
+    # is bilinear the moment recovery stops being a constant, so the month is a
+    # non-convex MIQCP rather than a MILP. See SOLVER_OPTIONS for what that
+    # takes. The bilinearity is only in 3 scalars, so spatial branch and bound
+    # has very little to branch on, but it is not free.
+    #
+    # And until the surrogate in the TODO above lands, the answer is known in
+    # advance: energy_intensity is a constant per m^3 of *feed*, so a m^3 of
+    # product costs ``intensity / recovery`` and recovery pins to RECOVERY_MAX at
+    # every demand. The window only starts to trade off once intensity rises with
+    # recovery, which is what putting the surrogate on a per-permeate basis does.
+    for i in plant.trains:
+        plant.ro[i].recovery.unfix()
+
+
     plant.post_treatment = ConstantEnergyIntensityModel(
         property_package=m.properties,
         energy_intensity=0.11 * _KWH_M3,
@@ -301,11 +781,15 @@ def construct_plant(m):
         )
     
     # TODO - replace this variable and constraint with a splitter
+    # Sized for the whole fixed intake, not for the skid: the header split is
+    # free (see feed_header), so a single train may be handed everything, and
+    # with its skid down the bypass is the only route that water has out. A
+    # bound of rated_feed would make that combination infeasible.
     plant.ro_bypass = pyo.Var(
         plant.trains,
         tb.time_index,
         domain=pyo.NonNegativeReals,
-        bounds=(0, rated_feed),
+        bounds=(0, intake_flow),
         units=_M3_HR,
         doc="Pretreated water routed around this train's RO skid, straight to "
         "the ocean outfall.",
@@ -363,17 +847,28 @@ def construct_plant(m):
             for i in plant.trains
         )
 
-    # The intake pump and the pretreatment units run whenever the plant does,
-    # so their status is pinned at 1 and never becomes a decision. The floor is
-    # 0, not a turndown limit: both sit upstream of the skids, so a train
-    # shutting down has to be free to pass less water -- and the intake pump
-    # none at all with every train off.
-    always_on = [(plant.intake_pump, 3 * rated_feed)]
-    always_on += [(plant.pretreatment[i], rated_feed) for i in plant.trains]
+    # The intake pump and the pretreatment units run whenever the plant does, so
+    # their status is pinned at 1 and never becomes a decision. Every one of
+    # them is sized for the whole fixed intake: the pump because it passes all
+    # of it, a pretreatment unit because the header split is free and it may be
+    # handed all of it. Sizing a pretreatment unit for an even third instead
+    # would be a *constraint*, not a sizing -- 3 * (1063.5 / 3) is exactly the
+    # intake, so the caps would bind and force the split.
+    always_on = [(plant.intake_pump, intake_flow)]
+    always_on += [(plant.pretreatment[i], intake_flow) for i in plant.trains]
     for unit, max_flow in always_on:
         add_status(unit, unit.flow_in, 0 * _M3_HR, max_flow * _M3_HR)
         for t in tb.time_index:
             unit.status[t].fix(1)
+
+    # Fixed-duty intake: the pump has no turndown, so this is a fixed value and
+    # not a bound. It buys nothing but a floor under the outfall -- feed_header
+    # conserves it into the trains, and everything the skids will not take has
+    # to leave through the bypass. Nothing here dictates *how* it splits: an
+    # even third is what the solver reports because every skid can then run at
+    # rated feed, not because the model requires it.
+    for t in tb.time_index:
+        plant.intake_pump.flow_in[t].fix(intake_flow)
 
     # Each skid is off, or running anywhere in [min_feed, rated_feed] -- the
     # plant's whole scheduling freedom, and what makes this a MILP. The
@@ -393,11 +888,17 @@ def construct_plant(m):
     # Post-treatment is the one downstream unit that is *not* always on: it is
     # what the recuperation window takes out. Floor of 0, so it can carry the
     # whole header or nothing.
+    #
+    # Sized at RECOVERY_MAX, not the nominal RECOVERY: this cap is a status link
+    # (flow <= max * status), so at the nominal 0.465 it would cap the header at
+    # 471.15 m^3/hr while three skids at rated feed and the top of the window
+    # make 506.5 -- the recovery window would be real on paper and clipped at
+    # 0.465 in every solve where all three trains run.
     add_status(
         plant.post_treatment,
         plant.post_treatment.flow_in,
         0 * _M3_HR,
-        N_TRAINS * rated_feed * recovery * _M3_HR,
+        N_TRAINS * rated_feed * RECOVERY_MAX * _M3_HR,
     )
 
     @plant.Constraint(
@@ -435,6 +936,32 @@ def construct_plant(m):
     # silently and ro[0] becomes the *first* skid off.
     register_parallel_group([plant.ro[i] for i in reversed(list(plant.trains))])
 
+    # The lead pair. Symmetry breaking alone leaves four plant states -- 3, 2, 1
+    # or 0 skids online -- and a single skid running is not one the plant has:
+    # the shared post-treatment and product pump cannot be turned down to one
+    # train's permeate. Pinning ro[0] to ro[1] deletes exactly that state, and
+    # the chain above does the rest:
+    #
+    #     register_parallel_group  ->  status[0] >= status[1] >= status[2]
+    #     lead_pair                ->  status[0] <= status[1]
+    #     together                 ->  status[0] == status[1] >= status[2]
+    #
+    # so the plant is at 3 trains, 2 trains, or down -- shut one skid, or shut
+    # the system. That is not only a fidelity fix. Without it the optimizer
+    # games the plant-level recuperation below: the penalty is "whatever is
+    # running goes off-spec", so the cheapest restart is to bring ro[0] up
+    # *alone*, spill a third of the permeate for 45 minutes, and snap the other
+    # two on at the exact step post-treatment returns. Every restart in the
+    # solved month did that. With the lead pair the window costs two trains'
+    # permeate and the restart reads as a real one.
+    @plant.Constraint(
+        tb.time_index,
+        doc="Lead pair: ro[0] and ro[1] start and stop together, so the plant "
+        "runs 3 trains, 2 trains, or none -- never a single skid.",
+    )
+    def lead_pair(b, t):
+        return plant.ro[0].status[t] <= plant.ro[1].status[t]
+
 
 def peak_window_hours() -> list[int]:
     """Return the hours the tariff's demand-charge rows cover.
@@ -457,11 +984,14 @@ def results_frame(m):
         m: A solved model from :func:`main`.
 
     Returns:
-        A DataFrame with per-train RO feed, status, startup and bypass; the
+        A DataFrame with per-train RO feed, permeate, status, startup and
+        bypass; the
         plant's feed / permeate / brine / outfall / product flows; on-spec and
         off-spec permeate; the per-stage and aggregate power draw; the number of
         trains online and recuperating; post-treatment's on/off status; and the
-        tariff energy price.
+        tariff energy price. The obligation the schedule was solved against
+        rides along in ``frame.attrs`` as ``demand_af`` / ``demand_m3``, so a
+        frame is self-describing and :func:`visualize` needs no second argument.
     """
     import pandas as pd
 
@@ -496,6 +1026,9 @@ def results_frame(m):
     data = {}
     for i in trains:
         data[f"ro{i}_feed_m3_per_hr"] = [pyo.value(plant.ro[i].feed[t]) for t in ti]
+        data[f"ro{i}_permeate_m3_per_hr"] = [
+            pyo.value(plant.ro[i].permeate[t]) for t in ti
+        ]
         data[f"ro{i}_status"] = [status(i, t) for t in ti]
         data[f"ro{i}_startup"] = [startup(i, t) for t in ti]
         data[f"ro{i}_bypass_m3_per_hr"] = [
@@ -566,6 +1099,10 @@ def results_frame(m):
     frame["energy_price"] = price_series(
         load_tariff(json.loads(CONFIG_PATH.read_text())["tariff"]), tb.datetime_index
     ).to_numpy()
+    # Set last: attrs do not survive every pandas operation, and the mask above
+    # is one that returns a new frame.
+    frame.attrs["demand_af"] = m.demand_af
+    frame.attrs["demand_m3"] = pyo.value(m.demand_volume)
     return frame
 
 
@@ -653,10 +1190,13 @@ def visualize(source, *, start=None, days: int = 3):
        recuperates stacked on top -- hatched grey rather than a fourth hue,
        because it is a loss, not a peer category. Product goes to zero for the
        whole window, since post-treatment carries the entire header.
-    2. **RO feed by train**, hand-stacked. Most of the time the trains are
+    2. **Permeate by train**, hand-stacked. Most of the time the trains are
        *identical*, so three overlaid traces would paint over each other and
        only the last would be visible; stacked, each band's thickness is that
-       train's own feed and the stack top is the plant's draw on the sea.
+       train's own permeate and the stack top is what the membranes made. Read
+       against panel 1: through a recuperation window this stack keeps its
+       height while product falls to zero, which is the whole of that permeate
+       going to brine.
     3. **Plant power** by section. Nothing generates or stores on site, so the
        stack top *is* the meter -- no separate net-grid trace, which would only
        cover the thin post-treatment band underneath.
@@ -710,9 +1250,16 @@ def visualize(source, *, start=None, days: int = 3):
     )
     fig.patch.set_facecolor(_SURFACE)
 
-    full_tilt = N_TRAINS * RATED_FEED_M3_PER_HR * RECOVERY
+    # RECOVERY_MAX: recovery is a degree of freedom, and a "full tilt" line drawn
+    # at the nominal recovery would sit *below* product the plant can legitimately
+    # make, reading as an impossible schedule rather than a high-recovery one.
+    full_tilt = N_TRAINS * RATED_FEED_M3_PER_HR * RECOVERY_MAX
     horizon_hours = len(frame) * dt_hours
-    flat_rate = demand_m3() / horizon_hours
+    # Off the frame, not off the module constant: the demand is a knob, and a
+    # reference line drawn at the default would quietly libel every other
+    # setting of it. A frame from an older results_frame carries neither attr.
+    demand_af = frame.attrs.get("demand_af", DEMAND_AF_PER_MONTH)
+    flat_rate = frame.attrs.get("demand_m3", demand_m3(demand_af)) / horizon_hours
     peak_mask = frame.index.hour.isin(peak_hours)
     billed_peak_kw = frame.loc[peak_mask, "grid_kw"].max()
     # ro[0] is the whole RO system under the symmetry breaking, and it is the
@@ -761,11 +1308,16 @@ def visualize(source, *, start=None, days: int = 3):
     ax = _style(axes[0], "m³/hr")
     shade(ax, label=True)
     ax.set_ylim(0, full_tilt * 1.3)
-    # The plant is sized close to its obligation, so these two land within a few
-    # percent of each other -- their labels push apart rather than overlap.
-    reference(ax, full_tilt, f"full tilt — {N_TRAINS} trains at rated feed",
+    # At the shipped demand the plant is sized close to its obligation, so these
+    # two land within a few percent of each other -- their labels push apart
+    # rather than overlap. The gap between them *is* the schedule's slack, and it
+    # opens as the demand comes down.
+    reference(ax, full_tilt,
+              f"full tilt — {N_TRAINS} trains at rated feed, {RECOVERY_MAX:.0%} "
+              "recovery",
               va="bottom")
-    reference(ax, flat_rate, "flat rate that would meet demand", va="top")
+    reference(ax, flat_rate, f"flat rate that would meet {demand_af:,.0f} AF",
+              va="top")
     ax.fill_between(hours, 0, detail["product_m3_per_hr"], step="post",
                     color=_TRAIN_RAMP[1], alpha=0.85, lw=0, zorder=2,
                     label="product water")
@@ -782,26 +1334,30 @@ def visualize(source, *, start=None, days: int = 3):
         color=_INK, fontsize=10, loc="left", pad=10,
     )
 
-    # -- per-train RO feed (m3/hr) ------------------------------------------
+    # -- per-train permeate (m3/hr) ------------------------------------------
     ax = _style(axes[1], "m³/hr")
     shade(ax)
-    ax.set_ylim(0, N_TRAINS * RATED_FEED_M3_PER_HR * 1.3)
-    _base = detail["ro0_feed_m3_per_hr"] * 0
+    ax.set_ylim(0, full_tilt * 1.3)
+    _base = detail["ro0_permeate_m3_per_hr"] * 0
     for _i in range(N_TRAINS):
-        _top = _base + detail[f"ro{_i}_feed_m3_per_hr"]
+        _top = _base + detail[f"ro{_i}_permeate_m3_per_hr"]
         ax.fill_between(hours, _base, _top, step="post", color=_TRAIN_RAMP[_i],
                         lw=1.0, edgecolor=_SURFACE, zorder=2,
                         label=f"train {_i + 1}")
         _base = _top
+    # Drawn at RECOVERY_MAX for the same reason the panel above is: at max
+    # recovery each band is as tall as that skid can make it, so a stack top
+    # short of the line is a skid dialled down, not an infeasible one.
     for _k in range(1, N_TRAINS + 1):
-        reference(ax, _k * RATED_FEED_M3_PER_HR,
-                  f"{_k} train{'s' if _k > 1 else ''} at rated feed")
+        reference(ax, _k * RATED_FEED_M3_PER_HR * RECOVERY_MAX,
+                  f"{_k} train{'s' if _k > 1 else ''} at {RECOVERY_MAX:.0%} "
+                  "recovery")
     ax.legend(frameon=False, fontsize=8, labelcolor=_MUTED, ncols=N_TRAINS,
               loc="upper left", bbox_to_anchor=(0, 0.99))
     ax.set_title(
-        f"RO feed by train — each skid is off, or inside its "
-        f"{MIN_FEED_M3_PER_HR:,.0f}–{RATED_FEED_M3_PER_HR:,.0f} m³/hr band; "
-        "symmetry breaking fills them in order",
+        f"Permeate by train — each skid is off, or at its "
+        f"{RATED_FEED_M3_PER_HR:,.0f} m³/hr feed with recovery free in "
+        f"{RECOVERY_MIN:.0%}–{RECOVERY_MAX:.0%}",
         color=_INK, fontsize=10, loc="left", pad=10,
     )
 
@@ -828,9 +1384,11 @@ def visualize(source, *, start=None, days: int = 3):
               f"{billed_peak_kw:,.0f} kW — the month's billed peak")
     ax.legend(frameon=False, fontsize=8, labelcolor=_MUTED, ncols=2,
               loc="upper left", bbox_to_anchor=(0, 0.99))
+    # An energy share, so it is quoted as one: the bill also carries a demand
+    # charge on the peak-window maximum, and only report_cost prices that.
     ax.set_title(
-        f"Plant power — the stack top is the meter, and the membranes are "
-        f"{frame['ro_kw'].sum() / frame['grid_kw'].sum():.0%} of the bill",
+        f"Plant power — Top of the stack is the facility meter, and RO is "
+        f"{frame['ro_kw'].sum() / frame['grid_kw'].sum():.0%} of the energy",
         color=_INK, fontsize=10, loc="left", pad=10,
     )
 
@@ -858,5 +1416,13 @@ def visualize(source, *, start=None, days: int = 3):
 
 if __name__ == "__main__":
     m = main()
-    results = solve_model(m)
+    results = solve_relax_and_fix(m)
     print(results)
+    print(
+        f"relax-and-fix: fixed {m.statuses_fixed:,} of "
+        f"{m.statuses_fixed + m.statuses_free:,} statuses at tol={m.fix_tol:g}"
+        f" ({len(m.fix_attempts)} rung(s) tried), "
+        f"relaxation gap {m.relaxation_gap:.3%}, "
+        f"MIP gap on the fixed problem {m.mip_gap:.3%}"
+    )
+    print(f"electricity bill: ${report_cost(m).operating.electricity:,.2f}")
