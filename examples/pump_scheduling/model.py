@@ -49,16 +49,19 @@ library composes and neither is obvious:
   Suction pressure is fixed once at the plant inlet; every downstream pressure
   then follows from ``pressure_change`` and the arcs.
 
-* **The property package uses ``fixed_density=False``.** With
-  ``fixed_density=True`` every state block's ``dens_mass`` is fixed, and while
-  :meth:`OpsBlockData.add_pass_through_constraints` skips a fully-fixed state
-  variable, Pyomo's ``expand_arcs`` does not — each arc still gets a
-  ``dens_mass`` equality. Over two arcs and 24 time points that is 48 equality
-  constraints over zero free variables, which shows up as a structural
-  singularity (an over-constrained set) and drags the reported degrees of
-  freedom to -24. Fixing density once at the plant suction and letting the
-  pass-throughs and arcs propagate it leaves a clean model: DoF == the 24 hourly
-  feed-flow decisions, and no over-constrained set.
+* **Density is a property-package constant, not a boundary condition.**
+  ``SimpleAqueousFlow`` takes ``density=`` and builds ``dens_mass_phase`` as an
+  always-fixed ``Var`` that it deliberately keeps out of
+  :meth:`define_state_vars`. Because it is not a state variable, ``expand_arcs``
+  writes no density equality across the arcs, and the model's degrees of freedom
+  come out as the 24 hourly feed-flow decisions with no over-constrained set.
+
+  This replaced an earlier ``fixed_density`` flag in flexPSE ``1112c776``
+  (2026-08-11). Under the old flag, ``fixed_density=True`` *did* put ``dens_mass``
+  in the state vars, so each of two arcs contributed 24 equalities over zero free
+  variables — a structural singularity that read as DoF == -24 — and this example
+  passed ``fixed_density=False`` and fixed density once at the plant suction to
+  dodge it. Nothing needs to dodge it now.
 """
 
 import json
@@ -260,9 +263,13 @@ def build_model(cfg: dict, *, flexible: bool = True, battery_sizing: str | None 
     )
     tb = m.time_block
 
-    # has_pressure=True is required by the hydraulic power law; fixed_density is
-    # deliberately False (see the module docstring).
-    m.properties = SimpleAqueousFlow(fixed_density=False, has_pressure=True)
+    # has_pressure=True is required by the hydraulic power law. Density is a
+    # property-package constant rather than a boundary condition (see the module
+    # docstring).
+    m.properties = SimpleAqueousFlow(
+        has_pressure=True,
+        density=fluid["density_kg_per_m3"] * pyunits.kg / pyunits.m**3,
+    )
     m.costing = FlexCosting(time_block=tb, tariff=cfg["tariff"])
 
     m.feed_pump = Pump(
@@ -298,12 +305,12 @@ def build_model(cfg: dict, *, flexible: bool = True, battery_sizing: str | None 
         m.product_pump.delta_pressure[t].fix(
             pyo.value(product["delta_pressure_bar"] * _BAR)
         )
-        # Plant boundary conditions: suction pressure and density enter once, at
-        # the feed pump inlet, and propagate downstream through the arcs.
+        # Plant boundary condition: suction pressure enters once, at the feed
+        # pump inlet, and propagates downstream through the arcs. Density is not
+        # a boundary condition -- it is set on the property package above.
         m.feed_pump.inlet_state.pressure[t].fix(
             pyo.value(fluid["suction_pressure_bar"] * _BAR)
         )
-        m.feed_pump.inlet_state.dens_mass[t].fix(fluid["density_kg_per_m3"])
         # The user/product delivery is the plant's fixed obligation.
         m.product_pump.outlet_state.flow_vol_phase[t, "Liq"].fix(demand[t])
 

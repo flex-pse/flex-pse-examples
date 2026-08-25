@@ -1,0 +1,160 @@
+{
+  "name": "desalination_scheduling",
+  "description": "A seawater desalination plant with three parallel treatment trains, scheduled against a time-of-use tariff. An intake pump feeds a header that splits across three pretreatment units; each pretreatment unit feeds its own reverse-osmosis skid, whose permeate recombines into a shared post-treatment step and a product water pump. Brine leaves each RO skid to the ocean outfall. The plant owes a fixed volume of product water per month rather than an hour-by-hour profile, so the only question is when to make it: the comparison is a flat 24/7 baseline against a schedule that turns RO trains down and off through the tariff peak.",
+  "time": {
+    "_comment": "A full calendar month at 15-minute resolution: 2976 time points. One calendar month is the longest horizon a single TimeBlock accepts (its max_length). The step is 15 minutes rather than an hour because the RO recuperation delay is 45 minutes and has to land on a whole number of steps; 15 min also divides the tariff's 16:00 and 21:00 boundaries exactly. The monthly water obligation is prorated onto this horizon (see demand), so a shorter horizon may be substituted without touching the demand figure.",
+    "start_date": "2025-07-01",
+    "end_date": "2025-08-01",
+    "time_step_hours": 0.25
+  },
+  "n_trains": 3,
+  "demand": {
+    "_comment": "265 acre-feet of product water per month, measured downstream of the product water pump. There is no hourly profile: the plant owes a volume over the month and may place it anywhere in the horizon, which is exactly the flexibility this example prices. Prorated onto the horizon as volume_af_per_month * (horizon hours / hours in the calendar month the horizon starts in).",
+    "volume_af_per_month": 265.0
+  },
+  "intake_pump": {
+    "_comment": "Seawater intake pump: lifts and screens raw feed into the pretreatment header, on a feed basis. always_on attaches a status binary pinned at 1 for every step (see logic.always_on_min_flow_m3_per_hr for why its lower bound is zero rather than a turndown floor).",
+    "energy_intensity_kwh_per_m3": 0.166,
+    "always_on": true
+  },
+  "pretreatment": {
+    "_comment": "One constant-energy-intensity unit per train, on the feed stream. always_on as for the intake pump: the status binary exists and is pinned at 1, so pretreatment never contributes a shutdown decision.",
+    "energy_intensity_kwh_per_m3": 0.01,
+    "always_on": true
+  },
+  "reverse_osmosis": {
+    "_comment": "One RO skid per train, fed by that train's pretreatment unit. energy_intensity_basis says which stream the intensity is quoted against: 'permeate' (3.31 kWh per m3 of product, the commonly quoted specific energy, converted to the feed basis the unit model bills on by multiplying by recovery) or 'feed'. rated_feed_m3_per_hr and min_feed_m3_per_hr make each skid semicontinuous -- off, or anywhere in [310, 337.67] m3/hr of feed -- which is the plant's scheduling freedom and what makes this a MILP. recovery_min/recovery_max are the membrane train's operating window; they bound the recovery Var, which stays fixed at 'recovery' unless a design or regression pass unfixes it (unfixing makes permeate = recovery * feed bilinear, so the model would classify as MINLP). recuperation_minutes is the restart penalty: for that long after every startup the skid runs at full power but its permeate is off-spec and is diverted to the brine line, so it earns no product. min_uptime_minutes / min_downtime_minutes are the flexops.logic.add_startup_shutdown windows -- how long a skid must stay on after a start and off after a stop. All three are counted in whole time steps, and min_uptime_minutes must be at least recuperation_minutes so that at most one startup can fall inside any recuperation window (a shorter run would burn full power and make nothing but off-spec water anyway).",
+    "energy_intensity_kwh_per_m3": 3.31,
+    "energy_intensity_basis": "permeate",
+    "recovery": 0.45,
+    "recovery_min": 0.4,
+    "recovery_max": 0.5,
+    "rated_feed_m3_per_hr": 337.67,
+    "min_feed_m3_per_hr": 310.0,
+    "recuperation_minutes": 45.0,
+    "min_uptime_minutes": 45.0,
+    "min_downtime_minutes": 15.0
+  },
+  "post_treatment": {
+    "_comment": "Remineralization/disinfection on the combined permeate header, downstream of the three RO skids.",
+    "energy_intensity_kwh_per_m3": 0.2
+  },
+  "product_pump": {
+    "_comment": "Delivers post-treated water to the distribution system. The monthly demand is measured at this pump's outlet.",
+    "energy_intensity_kwh_per_m3": 0.2
+  },
+  "logic": {
+    "_comment": "Optional flexops.logic pieces. These are modeling decisions rather than plant properties, so they live here rather than as constants in model.py -- turning any of them off leaves a valid, and different, model. relax_integrality applies flexops.logic.relax to every RO skid, switching its status/startup/shutdown binaries from Binary to UnitInterval: the month becomes an LP that solves in seconds instead of a 26,778-binary MILP. The relaxation is OPTIMISTIC -- a fractional status lets a skid run below its turndown floor and take a fractional startup, so the relaxed cost is a lower bound on the true flexible cost and the reported saving is an UPPER bound on the true saving. Set false to solve the exact MILP (and expect a long run; see solver.options).",
+    "break_parallel_symmetry": true,
+    "relax_integrality": true,
+    "always_on_min_flow_m3_per_hr": 0.0
+  },
+  "solver": {
+    "_comment": "prefer is passed to flexcore.solvers.get_solver; if that solver is unavailable or cannot take the problem class, get_solver logs a warning and falls through to its own priority list. options is forwarded verbatim to the Pyomo solver's solve(), so its keys are that solver's own option names -- these are HiGHS's. mip_rel_gap ends the branch and bound once the incumbent is provably within that fraction of optimal, which is what keeps a month of unit commitment tractable; time_limit is the backstop, and a run that hits it is reported rather than silently accepted.",
+    "prefer": "highs",
+    "options": {
+      "mip_rel_gap": 0.001,
+      "time_limit": 1800
+    }
+  },
+  "numerics": {
+    "_comment": "Post-solve snapping tolerances. A MILP solver returns an idle asset as a few nanowatts either side of zero; a negative one is not merely untidy, since EECO refuses to bill a negative draw. Anything within these of zero is treated as zero.",
+    "power_tolerance_kw": 1e-06,
+    "flow_tolerance_m3_per_hr": 1e-06
+  },
+  "reporting": {
+    "_comment": "Presentation only -- nothing here reaches the model. A month at 15-minute resolution is 2976 points, far too dense to read a 45-minute recuperation window off, so the notebook's single-schedule charts zoom into detail_window instead, and its headline chart averages every day of the horizon onto one time-of-day axis.",
+    "detail_window": {
+      "start_date": "2025-07-14",
+      "days": 3
+    }
+  },
+  "scenarios": {
+    "_comment": "'flexible' selects the RO strategy; 'selected' is the case the single-schedule charts render.",
+    "selected": "flexible",
+    "cases": [
+      {"label": "baseline", "flexible": false},
+      {"label": "flexible", "flexible": true}
+    ]
+  },
+  "tariff": {
+    "_comment": "EECO rate_data records. Peak window is 16:00-21:00 (hour_end exclusive), where energy is 4.5x the off-peak price and a monthly demand charge applies. FlexCosting prorates the monthly demand charge onto the horizon.",
+    "tariff_data": [
+      {
+        "utility": "electric",
+        "type": "customer",
+        "name": "fixed",
+        "assessed": "monthly",
+        "month_start": 1,
+        "month_end": 12,
+        "weekday_start": 0,
+        "weekday_end": 6,
+        "hour_start": 0,
+        "hour_end": 24,
+        "basic_charge_limit (metric)": 0,
+        "charge (metric)": 150.0,
+        "units": "$/month"
+      },
+      {
+        "utility": "electric",
+        "type": "demand",
+        "name": "peak_demand",
+        "assessed": "monthly",
+        "month_start": 1,
+        "month_end": 12,
+        "weekday_start": 0,
+        "weekday_end": 6,
+        "hour_start": 16,
+        "hour_end": 21,
+        "basic_charge_limit (metric)": 0,
+        "charge (metric)": 21.5,
+        "units": "$/kW"
+      },
+      {
+        "utility": "electric",
+        "type": "energy",
+        "name": "offpeak_energy",
+        "assessed": "",
+        "month_start": 1,
+        "month_end": 12,
+        "weekday_start": 0,
+        "weekday_end": 6,
+        "hour_start": 0,
+        "hour_end": 16,
+        "basic_charge_limit (metric)": 0,
+        "charge (metric)": 0.1,
+        "units": "$/kWh"
+      },
+      {
+        "utility": "electric",
+        "type": "energy",
+        "name": "peak_energy",
+        "assessed": "",
+        "month_start": 1,
+        "month_end": 12,
+        "weekday_start": 0,
+        "weekday_end": 6,
+        "hour_start": 16,
+        "hour_end": 21,
+        "basic_charge_limit (metric)": 0,
+        "charge (metric)": 0.45,
+        "units": "$/kWh"
+      },
+      {
+        "utility": "electric",
+        "type": "energy",
+        "name": "night_energy",
+        "assessed": "",
+        "month_start": 1,
+        "month_end": 12,
+        "weekday_start": 0,
+        "weekday_end": 6,
+        "hour_start": 21,
+        "hour_end": 24,
+        "basic_charge_limit (metric)": 0,
+        "charge (metric)": 0.1,
+        "units": "$/kWh"
+      }
+    ]
+  }
+}

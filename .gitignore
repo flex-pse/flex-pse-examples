@@ -164,8 +164,6 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs documentation
-/site
 
 # mypy
 .mypy_cache/
@@ -213,6 +211,9 @@ tempCodeRunnerFile.py
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Generated site build output (tools/site/build.py)
+_site/
 
 # Streamlit
 .streamlit/secrets.toml
