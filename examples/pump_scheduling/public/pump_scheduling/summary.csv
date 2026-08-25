@@ -1,0 +1,13 @@
+sweep_id,label,battery_fraction,strategy,battery_kw,battery_kwh,objective,operating_cost,electricity_cost,peak_kw,peak_window_grid_kwh,solver,termination,mip_gap,wall_seconds
+s00,inflexible @ 0%,0,inflexible,0,0,206.736,206.736,206.736,45.7246,218.306,highs,optimal,0,0.08
+s01,inflexible @ 20%,0.2,inflexible,11.2963,56.4815,186.075,186.075,186.075,35.6131,178.065,highs,optimal,0,0.08
+s02,inflexible @ 40%,0.4,inflexible,22.5926,112.963,166.845,166.845,166.845,27.5651,137.826,highs,optimal,0,0.08
+s03,inflexible @ 60%,0.6,inflexible,33.8889,169.444,147.616,147.616,147.616,19.5171,97.5855,highs,optimal,0,0.08
+s04,inflexible @ 80%,0.8,inflexible,45.1852,225.926,128.386,128.386,128.386,11.4691,57.3455,highs,optimal,0,0.08
+s05,inflexible @ 100%,1,inflexible,56.4815,282.407,109.157,109.157,109.157,3.42111,17.1056,highs,optimal,0,0.08
+s06,flexible @ 0%,0,flexible,0,0,142.519,142.519,142.519,19.4444,86.9048,highs,optimal,0,0.08
+s07,flexible @ 20%,0.2,flexible,11.2963,56.4815,121.858,121.858,121.858,9.3329,46.6645,highs,optimal,0,0.09
+s08,flexible @ 40%,0.4,flexible,22.5926,112.963,102.628,102.628,102.628,1.28491,6.42453,highs,optimal,0,0.09
+s09,flexible @ 60%,0.6,flexible,33.8889,169.444,99.5593,99.5593,99.5593,0,0,highs,optimal,0,0.09
+s10,flexible @ 80%,0.8,flexible,45.1852,225.926,99.5604,99.5604,99.5604,0,0,highs,optimal,0,0.14
+s11,flexible @ 100%,1,flexible,56.4815,282.407,99.5618,99.5618,99.5618,0,0,highs,optimal,0,0.09

@@ -1,0 +1,54 @@
+# Site and sweep metadata for pump_scheduling.
+# `tools/site/build.py` reads this to build the landing page and to validate the
+# example; `tools/sweep.py` reads the [sweep] block. See CONTRIBUTING.md.
+
+schema_version = 1
+name = "pump_scheduling"
+title = "Pump scheduling"
+order = 10
+
+# Two sentences. The landing-page card is a card, not a page.
+blurb = """
+A two-pump water plant fills a tank against a time-of-use tariff while meeting a fixed \
+24-hour product demand, with a battery on site and the option to run the feed pump \
+flexibly or at constant duty. Sweeping the battery from nothing to full peak-load rating \
+at both strategies prices the trade-off directly: how much storage is flexibility worth?"""
+
+tags = ["MILP", "storage vs flexibility", "24 h @ 1 h", "HiGHS"]
+
+[notebooks]
+solver = "notebook.py"
+sweep = "sweep.py"
+wasm = "explore.py"
+
+[wasm]
+mode = "run"
+show_code = false
+execute = true
+
+[solve]
+solver = "highs"
+runtime_minutes = 1
+ci_runnable = true
+
+[sweep]
+axis = "battery_fraction"
+axis_label = "Battery rating (fraction of peak plant load)"
+# The horizon is a single day, so the charts draw every row and there is nothing
+# to reduce -- `columns` is the only trimming that happens.
+columns = [
+    "feed_flow_m3_per_hr",
+    "feed_status",
+    "product_flow_m3_per_hr",
+    "tank_volume_m3",
+    "tank_level",
+    "grid_kw",
+    "battery_charge_kw",
+    "battery_discharge_kw",
+    "battery_soc",
+    "energy_price",
+]
+
+[[sweep.views]]
+name = "series"
+kind = "full"

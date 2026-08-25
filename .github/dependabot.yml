@@ -1,0 +1,14 @@
+# Keep the pinned action SHAs current.
+#
+# Every third-party action in .github/workflows/ is pinned to a full commit SHA
+# with the tag in a trailing comment. Dependabot rewrites both, so the pins stay
+# immutable without the workflows becoming unreadable.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "ci"

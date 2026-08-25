@@ -164,8 +164,6 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
-# mkdocs documentation
-/site
 
 # mypy
 .mypy_cache/
@@ -219,3 +217,6 @@ __marimo__/
 
 # Claude
 .claude/
+
+# Generated site output (tools/site/build.py)
+_site/

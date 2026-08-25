@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>flex-pse examples</title>
+<meta name="description" content="Interactive process-scheduling examples built with flex-pse: optimization models you can explore in the browser.">
+<style>
+{{ inline_css }}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap">
+    <p class="eyebrow">flex-pse</p>
+    <h1>Scheduling examples you can poke at</h1>
+    <p class="lede">
+      A gallery of process-systems test problems built with
+      <a href="https://github.com/flex-pse/flexPSE">flex-pse</a> — industrial plants
+      scheduled against real tariffs, each one solved offline and laid out here as a
+      page you can explore without installing anything.
+    </p>
+    <p class="masthead-links">
+      <a href="{{ repo_url }}">Source on GitHub</a>
+      <a href="https://github.com/flex-pse/flexPSE">flex-pse</a>
+      <a href="{{ repo_url }}/blob/main/CONTRIBUTING.md">Add an example</a>
+    </p>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section class="overview">
+  <h2>What this is</h2>
+  <div class="cols">
+    <div>
+      <p>
+        <strong>flex-pse</strong> is a process-systems toolbox for constrained
+        optimization over time-dependent industrial operations. You describe a
+        flowsheet — pumps, tanks, membranes, batteries — and it builds the Pyomo
+        model that decides how to run it: which units are on, at what duty, in
+        which hour, against a tariff that makes some hours far more expensive
+        than others.
+      </p>
+      <p>
+        Every example here is a complete problem instance rather than a toy: a
+        real flowsheet, a real tariff, and a question with a non-obvious answer.
+        Each has a page below, a model you can read, and a notebook that builds
+        and solves it.
+      </p>
+    </div>
+    <div>
+      <div class="note">
+        <h3>How these pages work</h3>
+        <p>
+          The optimization needs Pyomo, IDAES and a MILP solver, none of which
+          have a WebAssembly build — so nothing solves in your browser. Instead,
+          each model is solved offline across a sweep of one design parameter,
+          and the results are committed to the repository. The pages replay that
+          sweep: the charts, tables and controls are live, but the schedules
+          behind them were computed in advance.
+        </p>
+        <p>
+          Each page says so at the top and links back to the model and the
+          solver-level notebook, which you can run yourself from the conda
+          environment in the repository.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="examples">
+  <h2>Examples</h2>
+  <ul class="grid">
+    {% for example in examples %}
+    <li class="card">
+      <h3><a href="{{ example.page }}">{{ example.title }}</a></h3>
+      <p class="blurb">{{ example.blurb }}</p>
+      <ul class="tags">
+        {% for tag in example.tags %}
+        <li>{{ tag }}</li>
+        {% endfor %}
+      </ul>
+      <p class="actions">
+        <a class="primary" href="{{ example.page }}">Explore &rarr;</a>
+        <a href="{{ example.source_url }}">Model</a>
+        <a href="{{ example.solver_url }}">Notebook</a>
+      </p>
+      <p class="meta">
+        {{ example.summary_rows }} solved case{{ '' if example.summary_rows == 1 else 's' }}
+        {% if example.provenance.get('solver') %}· {{ example.provenance['solver'] }}{% endif %}
+        {% if example.provenance.get('generated_utc') %}· solved {{ example.provenance['generated_utc'][:10] }}{% endif %}
+        {% if example.provenance.get('flexpse_commit') %}· flex-pse <code>{{ example.provenance['flexpse_commit'][:8] }}</code>{% endif %}
+      </p>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+
+<section class="start">
+  <h2>Running them yourself</h2>
+  <p>
+    The pages above are read-only replays. To change the problem — a different
+    tariff, a different demand, a different flowsheet — clone the repository and
+    run the solver-level notebooks:
+  </p>
+<pre><code>git clone {{ repo_url }}.git
+cd flex-pse-examples
+conda env create -f environment.yml
+conda activate flex-pse-examples
+
+marimo run examples/pump_scheduling/notebook.py</code></pre>
+  <p>
+    Regenerate a page's data with
+    <code>python tools/sweep.py examples/&lt;name&gt;</code>, and rebuild the site with
+    <code>python tools/site/build.py --out _site</code>. Adding a new example is
+    documented in <a href="{{ repo_url }}/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>.
+  </p>
+</section>
+
+</main>
+
+<footer class="wrap">
+  <p>
+    Built with <a href="https://marimo.io">marimo</a> and served from GitHub Pages.
+    The notebook pages load their Python runtime from a CDN, so they need a
+    network connection on first open.
+  </p>
+</footer>
+
+</body>
+</html>

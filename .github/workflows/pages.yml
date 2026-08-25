@@ -1,0 +1,100 @@
+# Build the site and publish it to GitHub Pages.
+#
+# This workflow installs no flex-pse and runs no solver. Every example's results
+# are solved offline and committed under examples/<name>/public/, so the site
+# build only has to export notebooks and render a page -- it is fast, and it
+# cannot be broken by upstream drift. Whether the *models* still work is the
+# other workflow's job (examples.yml).
+#
+# Pull requests run the build and stop. The deploy job's `if` is the whole of
+# that story; nothing else about the workflow changes between a PR and a merge.
+#
+# One-time setup: Settings -> Pages -> Source: GitHub Actions. Until that is set,
+# the deploy step fails with a 404 from the Pages API.
+
+name: pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Mondays, off the hour: the hour marks are the busiest slots on shared
+    # runners and scheduled jobs get queued behind them.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+# Read-only by default. The deploy job escalates for itself; the build job has
+# no business holding a token that can publish.
+permissions:
+  contents: read
+
+concurrency:
+  # A PR cancels its own earlier run -- only the latest push matters. main and
+  # the cron share one group and never cancel, because interrupting a deploy
+  # mid-flight can leave the Pages API wedged.
+  group: >-
+    ${{ github.event_name == 'pull_request'
+        && format('pages-pr-{0}', github.event.number)
+        || 'pages' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: true
+
+      # `marimo export html-wasm` shells out to `uv tool run ruff analyze graph`
+      # to build the notebook's import graph -- on every export, for every
+      # notebook, whether or not it has local imports. Without this cache each
+      # build re-downloads ruff.
+      - name: Cache uv tool installs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.local/share/uv/tools
+          key: uv-tools-${{ runner.os }}-ruff
+
+      - name: Build site
+        run: |
+          uv run --no-project --python 3.13 \
+            --with 'marimo==0.24.0' \
+            --with 'pandas>=2' \
+            --with 'jinja2>=3.1' \
+            python tools/site/build.py --out _site
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+      # A PR does not deploy, so give the reviewer something to actually open.
+      - name: Upload PR preview
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: site-preview
+          path: _site
+          retention-days: 7
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

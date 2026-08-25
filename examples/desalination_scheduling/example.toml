@@ -1,0 +1,65 @@
+# Site and sweep metadata for desalination_scheduling.
+# `tools/site/build.py` reads this to build the landing page and to validate the
+# example; `tools/sweep.py` reads the [sweep] block. See CONTRIBUTING.md.
+
+schema_version = 1
+name = "desalination_scheduling"
+title = "Desalination scheduling"
+order = 20
+
+blurb = """
+A seawater plant with three parallel RO trains owes a fixed volume of product water over a \
+month — not an hourly profile — and has no storage, so its only lever is when to make it. \
+Sweeping that obligation upward from half the plant's capacity shows the schedule running out \
+of slack, and a restart penalty that bites well before the tariff does."""
+
+tags = ["MIQCP", "unit commitment", "1 month @ 15 min", "Gurobi", "~27k binaries"]
+
+[notebooks]
+solver = "notebook.py"
+sweep = "sweep.py"
+wasm = "explore.py"
+
+[wasm]
+mode = "run"
+show_code = false
+execute = true
+
+[solve]
+solver = "gurobi"
+runtime_minutes = 3
+# The exact month is a non-convex MIQCP: unfixed RO recovery makes
+# `permeate == recovery * feed` bilinear, so it needs Gurobi's spatial branch and
+# bound and HiGHS cannot take the problem at all. No Gurobi license on a public
+# runner, so tests/test_desalination_smoke.py solves a linearized short horizon
+# instead -- see that file for exactly what is and is not covered.
+ci_runnable = false
+
+[sweep]
+axis = "demand_af"
+axis_label = "Monthly obligation (acre-feet of product water)"
+columns = [
+    "trains_online",
+    "trains_recuperating",
+    "post_treatment_status",
+    "ro0_status",
+    "ro1_status",
+    "ro2_status",
+    "product_m3_per_hr",
+    "onspec_permeate_m3_per_hr",
+    "offspec_permeate_m3_per_hr",
+    "ro_kw",
+    "grid_kw",
+    "energy_price",
+]
+
+# A month at 15-minute resolution is 2,976 rows and unreadable as a line chart,
+# so the page draws two reductions of it rather than the whole thing.
+[[sweep.views]]
+name = "series"
+kind = "window"
+days = 3
+
+[[sweep.views]]
+name = "profile"
+kind = "diurnal"
