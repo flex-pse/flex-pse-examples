@@ -408,8 +408,8 @@ def _(mo, provenance):
 | --- | --- |
 {_rows}
 
-Regenerate with `python tools/sweep.py examples/pump_scheduling` in the conda
-environment from `environment.yml`.
+Regenerate with `python tools/sweep.py examples/pump_scheduling` in an
+environment with `pip install -e .` from `pyproject.toml`.
 """
             )
         }

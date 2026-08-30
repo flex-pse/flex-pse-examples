@@ -108,7 +108,7 @@ def solved(model):
 def test_the_flowsheet_still_builds_and_solves(solved):
     """The model constructs against the installed flexPSE and reaches optimal.
 
-    This is the assertion that catches upstream drift: `environment.yml` tracks
+    This is the assertion that catches upstream drift: `pyproject.toml` tracks
     flexPSE at `@main`, so a renamed unit-model option breaks this example with
     no commit landing in this repository.
     """

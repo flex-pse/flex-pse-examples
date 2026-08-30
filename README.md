@@ -38,19 +38,37 @@ layout: a `config.json` describing the problem instance, a `model.py` holding th
 
 ## Getting Started
 
-The environment is defined in [environment.yml](environment.yml) and pins Python 3.13 plus
-`flex-pse[solvers, dev]` from the upstream `main` branch.
+Dependencies are defined in [pyproject.toml](pyproject.toml), which installs `flex-pse[solvers]`
+from the upstream `main` branch.
 
 ```bash
-conda env create -f environment.yml
-conda activate flex-pse-examples
+pip install -e .[notebooks]
+pip install --group dev  # pytest, jinja2, ruff -- only needed to run the test suite
 ```
 
-To pick up newer upstream changes later:
+To pick up newer upstream changes later, reinstall `flex-pse` from `main`:
 
 ```bash
-conda env update -f environment.yml --prune
+pip install --force-reinstall --no-deps "flex-pse[solvers] @ git+https://github.com/flex-pse/flexPSE.git@main"
 ```
+
+## Using the Examples Programmatically
+
+Once installed, both examples are importable without cloning the repo:
+
+```python
+from flex_pse_examples import list_examples, load_model
+
+list_examples()  # ['desalination_scheduling', 'pump_scheduling']
+
+m = load_model("pump_scheduling")
+cfg = m.load_config()
+model = m.build_model(cfg)
+m.solve_model(model)
+```
+
+`load_model` returns the example's `model` module itself -- a model isn't built until you call
+`build_model(cfg)` on it. See each example's `model.py` for what else it exposes.
 
 ## Running an Example
 
@@ -103,9 +121,9 @@ pytest
 The suite has two halves. `tests/test_sweep_data.py` and `tests/test_wasm_notebooks.py` need
 only pandas: they check that every example's committed data matches the contract the website
 reads, and that no page imports something a browser cannot run. The rest solve real models, and
-so need the conda environment.
+so need `flex-pse` and its solvers installed (`pip install -e .` above).
 
-`environment.yml` installs flex-pse from `git+…@main`, which pins nothing, so an example can
+`pyproject.toml` installs flex-pse from `git+…@main`, which pins nothing, so an example can
 break without a commit landing here. The `examples` workflow re-runs the solves weekly against
 whatever upstream is that day.
 
@@ -113,9 +131,10 @@ whatever upstream is that day.
 
 ```
 .
-├── conftest.py         # repository-wide pytest configuration
-├── environment.yml     # conda environment (Python + flex-pse[solvers, dev])
-├── CONTRIBUTING.md     # how to add an example
+├── conftest.py                  # repository-wide pytest configuration
+├── pyproject.toml               # dependencies (Python + flex-pse[solvers]) and packaging
+├── flex_pse_examples/__init__.py  # list_examples()/load_model(): the installed package's API
+├── CONTRIBUTING.md              # how to add an example
 ├── tools/
 │   ├── sweep.py        # solves an example across its sweep, writes the site's data
 │   ├── check_drift.py  # does a committed sweep still reproduce?

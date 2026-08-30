@@ -1,6 +1,6 @@
 # Do the examples still solve?
 #
-# environment.yml installs flex-pse from `git+...@main`, which pins nothing, so
+# pyproject.toml installs flex-pse from `git+...@main`, which pins nothing, so
 # these examples can break without a commit landing in this repository. That is
 # what the weekly run is for. The site build (pages.yml) deliberately does not
 # depend on any of this -- every published result is committed, so the site keeps
@@ -15,14 +15,14 @@ on:
       - "examples/**"
       - "tests/**"
       - "tools/**"
-      - "environment.yml"
+      - "pyproject.toml"
       - ".github/workflows/examples.yml"
   pull_request:
     paths:
       - "examples/**"
       - "tests/**"
       - "tools/**"
-      - "environment.yml"
+      - "pyproject.toml"
       - ".github/workflows/examples.yml"
   schedule:
     - cron: "41 6 * * 1"
@@ -52,7 +52,10 @@ jobs:
           enable-cache: true
 
       # No flexops here, and none needed: these tests read committed CSVs and
-      # parse notebooks. The one test that does need it skips itself.
+      # parse notebooks. The one test that does need it skips itself. The
+      # `--with` list here is a fast, isolated stand-in for the project's
+      # actual dependencies -- cross-check against pyproject.toml's
+      # `[dependency-groups]`/`[project.dependencies]` if it ever drifts.
       - name: Data contract and WASM safety
         run: |
           uv run --no-project --python 3.13 \
@@ -64,49 +67,30 @@ jobs:
   solve:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    defaults:
-      run:
-        # A login shell is what makes `conda activate` work in later steps.
-        shell: bash -el {0}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - id: week
-        # The cache key has to expire. flex-pse is installed from an unpinned
-        # git branch, so a key that only hashes environment.yml would pin the
-        # environment forever and this job would test a frozen upstream --
-        # which is the one thing it exists not to do.
-        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
-
-      # Install conda WITHOUT the environment file, so the cache below gets a
-      # chance to restore before anything is solved. Creating the environment
-      # here and caching afterwards -- the obvious ordering -- makes the cache
-      # pure overhead: it would be written every run and never read.
-      - uses: conda-incubator/setup-miniconda@8ee1f361103df19b6f8c8655fd3967a8ecb162d5 # v4.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          activate-environment: flex-pse-examples
-          miniforge-version: latest
-          use-mamba: true
+          enable-cache: true
 
-      - id: cache
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ env.CONDA }}/envs
-          key: >-
-            conda-${{ runner.os }}-${{ hashFiles('environment.yml') }}-${{ steps.week.outputs.week }}
-
-      - name: Create the environment
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: mamba env update -n flex-pse-examples -f environment.yml
+      # `flex-pse` is a core dependency, installed from an unpinned git
+      # branch, and there's no committed uv.lock -- so this always resolves
+      # against whatever `main` is today rather than reusing a stale
+      # resolution. `uv sync` installs the project itself plus the `dev`
+      # group (pytest, jinja2, ruff); `highspy` comes along transitively via
+      # `flex-pse[solvers]`.
+      - name: Install the project
+        run: uv sync --group dev
 
       # Print what upstream actually resolved to. When this job goes red, the
       # first question is always "against which flexPSE?", and the answer should
       # be in the log rather than in a bisect.
       - name: Record the resolved flexPSE commit
         run: |
-          python - <<'PY'
+          uv run --no-sync python - <<'PY'
           import importlib.metadata as md, json
           dist = md.distribution("flex-pse")
           print("flex-pse", dist.version)
@@ -119,10 +103,13 @@ jobs:
 
       - name: Solvers available
         run: |
-          python -c "import highspy; print('highspy', highspy.__version__)"
+          uv run --no-sync python -c "
+          import importlib.metadata, highspy
+          print('highspy', importlib.metadata.version('highspy'))
+          "
 
       - name: Solve
-        run: pytest -q tests/
+        run: uv run --no-sync pytest -q tests/
 
   # Has the committed data drifted from what the model produces today? Weekly
   # only, and it opens an issue rather than failing red forever -- drift is a
@@ -135,9 +122,6 @@ jobs:
     permissions:
       contents: read
       issues: write
-    defaults:
-      run:
-        shell: bash -el {0}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -145,16 +129,16 @@ jobs:
 
       # Uncached on purpose: this job runs weekly and its entire question is
       # "what does upstream do today", so it should always resolve fresh.
-      - uses: conda-incubator/setup-miniconda@8ee1f361103df19b6f8c8655fd3967a8ecb162d5 # v4.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
-          environment-file: environment.yml
-          activate-environment: flex-pse-examples
-          miniforge-version: latest
-          use-mamba: true
+          enable-cache: false
+
+      - name: Install the project
+        run: uv sync --group dev
 
       - id: check
         continue-on-error: true
-        run: python tools/check_drift.py examples/pump_scheduling --rtol 1e-3
+        run: uv run --no-sync python tools/check_drift.py examples/pump_scheduling --rtol 1e-3
 
       - name: Open an issue on drift
         if: steps.check.outcome == 'failure'

@@ -3,7 +3,7 @@
 This is the one example that runs end to end on a free CI runner: 24 hourly
 steps, four to twelve small LPs and MILPs, HiGHS, a couple of seconds. It is
 therefore also the example that catches upstream drift in flexPSE, which
-``environment.yml`` tracks at ``@main`` and so does not pin at all.
+``pyproject.toml`` tracks at ``@main`` and so does not pin at all.
 
 The assertions are deliberately about the *claim* the example makes, not just
 about it returning without raising. A model that solves to a schedule where
