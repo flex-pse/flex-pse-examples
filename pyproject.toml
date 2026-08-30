@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flex-pse-examples"
+version = "0.1.0"
+description = "Runnable flex-pse example flowsheets: desalination scheduling and pump scheduling"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [{name = "Flex-PSE"}]
+requires-python = ">=3.13"
+dependencies = [
+  "flex-pse[solvers] @ git+https://github.com/flex-pse/flexPSE.git@main",
+  "pyomo>=6.7",
+  "pandas>=2",
+  "numpy",
+  "matplotlib",
+  "duckdb>=1.1",
+]
+
+[project.optional-dependencies]
+notebooks = ["marimo==0.24.0"]
+
+[project.urls]
+Homepage = "https://flex-pse.github.io/flex-pse-examples/"
+Repository = "https://github.com/flex-pse/flex-pse-examples"
+
+[dependency-groups]
+dev = ["pytest", "jinja2>=3.1", "ruff"]
+
+[tool.setuptools.package-dir]
+"flex_pse_examples.examples" = "examples"
+"flex_pse_examples.examples.desalination_scheduling" = "examples/desalination_scheduling"
+"flex_pse_examples.examples.pump_scheduling" = "examples/pump_scheduling"
+
+[tool.setuptools]
+packages = [
+  "flex_pse_examples",
+  "flex_pse_examples.examples",
+  "flex_pse_examples.examples.desalination_scheduling",
+  "flex_pse_examples.examples.pump_scheduling",
+]
+
+[tool.setuptools.package-data]
+"flex_pse_examples.examples.desalination_scheduling" = [
+  "config.json", "example.toml", "public/desalination_scheduling/*.parquet",
+]
+"flex_pse_examples.examples.pump_scheduling" = [
+  "config.json", "example.toml", "public/pump_scheduling/*.parquet",
+]

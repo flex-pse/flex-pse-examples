@@ -299,7 +299,7 @@ def _shrink(frame):
 def _flexpse_provenance() -> dict[str, str]:
     """Return the installed flex-pse version and, if resolvable, its commit.
 
-    ``environment.yml`` installs flex-pse from ``git+...@main``, which pins
+    ``pyproject.toml`` installs flex-pse from ``git+...@main``, which pins
     nothing. Without the resolved commit a committed sweep cannot be reproduced
     or even dated against upstream, so dig it out of the ``direct_url.json`` pip
     leaves behind for a VCS install.

@@ -163,11 +163,11 @@ and the solves.
 `pages.yml` installs no flex-pse and runs no solver — the sweeps are committed,
 so the site build is fast and cannot be broken by an upstream change.
 
-`examples.yml` is what notices upstream changes. `environment.yml` installs
+`examples.yml` is what notices upstream changes. `pyproject.toml` installs
 flex-pse from `git+…@main`, which pins nothing, so an example can break with no
-commit landing here; the weekly run is the thing that finds out. Its conda cache
-key includes the ISO week for exactly that reason — a permanent cache would test
-a frozen upstream forever.
+commit landing here; the weekly run is the thing that finds out. There's no
+committed `uv.lock`, so `uv sync` re-resolves that dependency fresh on every
+run rather than reusing a stale one.
 
 **Not covered, and worth knowing:**
 
