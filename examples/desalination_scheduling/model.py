@@ -23,10 +23,20 @@ Each train in detail — the RO bypass tees off the pretreatment outlet::
                                     └─► permeate ─┬─ off-spec ─┘
                                                   └─► on-spec ─► post-treat
 
+Every box and every junction in those diagrams is a flex-pse block wired with
+``Arc``s -- the tees are ``Splitter``s, the permeate header is a ``Mixer``, and
+the three streams that cross the facility boundary are a ``Feed`` (seawater) and
+two ``Product``s (potable water, and the ocean outfall). None of the mass
+balances are written here: a ``Splitter`` carries conservation and deliberately
+no split fraction, so the routing stays the decision the objective makes. The
+one constraint this module still writes by hand is the recuperation window, and
+it is marked with the flex-pse issue that would remove it.
+
 Every unit but the RO skids is a constant energy intensity — kWh per m^3 of
-whatever passes through it. The RO skids are constant intensity, which may 
+whatever passes through it. The RO skids are constant intensity, which may
 be replaced by a custom surrogate *and* a split: ``permeate == recovery * feed``,
-brine takes the rest.
+brine takes the rest. Note the RO intensity is quoted per m^3 of **permeate**,
+which is the basis ``ReverseOsmosis`` applies it on.
 
 The intake pump is **fixed duty**: 1063.5 m^3/hr of seawater every step, no
 turndown, whatever the skids are doing. Three skids at rated feed can swallow
@@ -109,18 +119,30 @@ import pyomo.environ as pyo
 from pyomo.environ import units as pyunits
 from pyomo.network import Arc
 
-from flexops.core.plant_block import PlantBlock
-from flexops.core.time_block import TimeBlock
-from flexops.costing import FlexCosting
+# The blocks and unit models come off the top-level namespace, which is the
+# public API `docs/how_to/build_a_plant.md` is written against. The logic
+# helpers are not exported there and keep their `flexops.logic` path.
+from flexops import (
+    ConstantEnergyIntensityModel,
+    Feed,
+    FlexCosting,
+    Mixer,
+    PlantBlock,
+    Product,
+    Pump,
+    ReverseOsmosis,
+    SimpleAqueousFlow,
+    Splitter,
+    TimeBlock,
+)
 from flexops.logic import (
+    add_conditional,
     add_startup_shutdown,
     add_status,
     register_parallel_group,
     relax,
     unrelax,
 )
-from flexops.properties.simple_aqueous import SimpleAqueousFlow
-from flexops.unit_models import ConstantEnergyIntensityModel, Pump, ReverseOsmosis
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
 
@@ -226,7 +248,7 @@ SOLVER = "gurobi"
 #: for 2h15m after a restart rather than the 45 minutes the constraint requires:
 #: feasible, within tolerance, and wrong on the one behaviour the example exists
 #: to show. At 0.2% the window is exactly three steps and the month still solves
-#: in well under a minute.
+#: in a few minutes -- about 6 on a laptop, most of it the relax-and-fix MIP.
 #:
 #: ``NonConvex=2`` is what an unfixed recovery costs: the split
 #: ``permeate[t] == recovery * feed[t]`` is bilinear, so the month is a
@@ -298,7 +320,8 @@ def main(
         A ``pyo.ConcreteModel`` with the plant, the product-delivery
         obligation, and ``objective`` (the in-model operating cost -- a solve
         target, not a bill; :func:`report_cost` is the bill). The obligation is
-        on ``m.demand_volume`` (a mutable ``Param``, m^3) and ``m.demand_af``
+        on ``m.plant.potable.delivery_min`` (a mutable ``Param``, m^3, which
+        :func:`set_demand` rewrites) and ``m.demand_af``
         (the acre-feet it was set from).
     """
     m = pyo.ConcreteModel(name="desalination_example")
@@ -362,11 +385,13 @@ def max_product_af() -> float:
 def set_demand(m, demand_af: float) -> float:
     """Retarget the horizon's product-water obligation on a built model.
 
-    The obligation is a mutable ``Param``, so this is all that stands between
-    one demand and the next: no constraint in the flowsheet changes, only the
-    number on the right-hand side of ``product_delivery``, and the model is ready
-    to re-solve. That is what the notebook's demand slider moves -- the month is
-    built once and each new demand pays for its solve alone.
+    The obligation is the mutable ``Param`` the product ``Product`` block built
+    for its horizon-basis ``min_demand`` -- ``plant.potable.delivery_min``, a
+    scalar because the limit is on the month's total and not on any one step. So
+    this is all that stands between one demand and the next: no constraint in
+    the flowsheet changes, only that Param, and the model is ready to re-solve.
+    That is what the notebook's demand slider moves -- the month is built once
+    and each new demand pays for its solve alone.
 
     Args:
         m: A model from :func:`main`, solved or not.
@@ -378,8 +403,9 @@ def set_demand(m, demand_af: float) -> float:
         The new obligation in m^3.
     """
     m.demand_af = float(demand_af)
-    m.demand_volume.set_value(demand_m3(m.demand_af))
-    return pyo.value(m.demand_volume)
+    volume = demand_m3(m.demand_af)
+    m.plant.potable.delivery_min.set_value(volume)
+    return volume
 
 
 def logic_units(plant):
@@ -424,39 +450,18 @@ def status_vars(plant):
 
 
 def add_demand_and_objective(m, demand_af: float = DEMAND_AF_PER_MONTH):
-    """Attach the horizon's water obligation and the objective the solver minimizes.
+    """Target the horizon's water obligation and add the objective the solver minimizes.
 
-    The objective is the in-model operating cost, which is a solve target and
-    not a statement about money -- see :func:`report_cost`.
+    The obligation's *constraint* is part of the flowsheet -- the product
+    ``Product`` block carries it -- so this only sets the number and builds the
+    objective. The objective is the in-model operating cost, which is a solve
+    target and not a statement about money -- see :func:`report_cost`.
     """
-    tb = m.time_block
-    plant = m.plant
-
-    # Mutable, so set_demand can retarget the obligation without rebuilding the
-    # month. It is the model's one free parameter: everything else here is plant.
-    m.demand_af = float(demand_af)
-    m.demand_volume = pyo.Param(
-        initialize=demand_m3(m.demand_af),
-        mutable=True,
-        units=pyunits.m**3,
-        doc="Product water owed over the horizon.",
-    )
-
-    dt_hours = pyo.value(pyunits.convert(tb.dt, pyunits.hr))
-    # TODO(#67) - replace this constraint with plant.add_product_demand once
-    # flex-pse ships it.
-    plant.product_delivery = pyo.Constraint(
-        expr=sum(
-            plant.product_pump.outlet_state.flow_vol_phase[t, "Liq"]
-            for t in tb.time_index
-        )
-        * dt_hours
-        * pyunits.hr
-        >= m.demand_volume,
-        doc="Deliver at least the horizon's obligation, measured downstream of "
-        "the product pump. A volume, not a profile -- placing it in the "
-        "cheap hours is the whole degree of freedom.",
-    )
+    # The obligation itself is a constraint on the product Product block, built
+    # with the flowsheet in construct_plant -- `min_demand` on the horizon basis,
+    # which bounds the scalar `delivery_total` rather than any one step. All that
+    # is left here is to point it at this demand.
+    set_demand(m, demand_af)
 
     m.costing.cost_process()
 
@@ -711,14 +716,24 @@ def construct_plant(m):
         costing_package=m.costing,
     )
     
-    # TODO - replace this with a custom surrogate and defined based on a per unit of permeate basis.
+    # TODO - replace this with a custom surrogate, so intensity rises with
+    # recovery instead of being flat across the window.
+    #
+    # 3.34 kWh per m^3 of *permeate*, which is how an SWRO figure is normally
+    # quoted. It used to be written ``3.34 * 0.465`` -- the same figure converted
+    # to a per-feed basis, because ReverseOsmosis applied energy_intensity to the
+    # feed. flex-pse bc69357 moved the relation onto the permeate stream, so the
+    # conversion has to come back out or the plant draws recovery times too
+    # little power. (The class docstring still says feed while the config option
+    # says product; that contradiction is flex-pse#85, not this example's bug --
+    # the code at reverseosmosis.py:108 is what runs.)
     plant.ro = ReverseOsmosis(
         plant.trains,
         property_package=m.properties,
         recovery=recovery,
         recovery_min=RECOVERY_MIN,
         recovery_max=RECOVERY_MAX,
-        energy_intensity=3.34 * 0.465 * _KWH_M3,
+        energy_intensity=3.34 * _KWH_M3,
         costing_package=m.costing,
     )
 
@@ -737,10 +752,14 @@ def construct_plant(m):
     # has very little to branch on, but it is not free.
     #
     # And until the surrogate in the TODO above lands, the answer is known in
-    # advance: energy_intensity is a constant per m^3 of *feed*, so a m^3 of
-    # product costs ``intensity / recovery`` and recovery pins to RECOVERY_MAX at
-    # every demand. The window only starts to trade off once intensity rises with
-    # recovery, which is what putting the surrogate on a per-permeate basis does.
+    # advance: recovery pins to RECOVERY_MAX at every demand. With intensity on a
+    # per-permeate basis a m^3 of product costs the same 3.34 kWh whatever the
+    # recovery, so recovery buys nothing on the *energy* side -- what it buys is
+    # capacity. The intake is fixed-duty, so a higher recovery turns the same
+    # seawater into more permeate per skid-hour, and the month's obligation is
+    # met in fewer running hours that the schedule can then place in the cheap
+    # ones. The window only starts to trade off once intensity rises with
+    # recovery, which is what the surrogate above is for.
     for i in plant.trains:
         plant.ro[i].recovery.unfix()
 
@@ -758,94 +777,158 @@ def construct_plant(m):
         costing_package=m.costing,
     )
     
-    # No pretreatment -> RO arc: an Arc is one-to-one, and each pretreatment
-    # outlet now tees two ways -- skid feed, or the RO bypass. That tee is the
-    # ro_feed_split balance below.
+    # Every junction below is a flex-pse block, not a balance written here. A
+    # Splitter carries conservation and nothing else -- no split fraction -- so
+    # the routing stays the decision the objective makes, which is exactly what
+    # the hand-written tees it replaces were for. A Mixer is its mirror.
+    #
+    # The property package is flow-only (SimpleAqueousFlow defaults
+    # has_pressure/has_temperature to False), so each junction adds its
+    # volumetric balance and nothing else: no pressure or temperature
+    # pass-through equations come along for the ride.
+    plant.feed_header = Splitter(
+        property_package=m.properties,
+        outlet_names=tuple(f"t{i}" for i in plant.trains),
+    )
+
+    plant.train_split = Splitter(
+        plant.trains,
+        property_package=m.properties,
+        outlet_names=("ro", "bypass"),
+    )
+
+    # The permeate tee. The constraint this replaces was an inequality --
+    # "a train can send no more to the header than it makes" -- with the
+    # remainder implicit. As a Splitter it is the equality
+    # `permeate == header + offspec` with `offspec >= 0`, which says the same
+    # thing and gives the dumped stream a name the outfall can be wired to.
+    plant.permeate_split = Splitter(
+        plant.trains,
+        property_package=m.properties,
+        outlet_names=("header", "offspec"),
+    )
+
+    plant.permeate_header = Mixer(
+        property_package=m.properties,
+        inlet_names=tuple(f"t{i}" for i in plant.trains),
+    )
+
+    # The ocean outfall, as a boundary sink rather than the reporting-only
+    # Expression it used to be. A Product deliberately does *not* blend its
+    # inlets -- it aggregates flow -- which is what an outfall wants: three
+    # streams per train arriving on their own ports. Unpriced, so it adds no
+    # operating cost; it meters the discharge into total_product["outfall"].
+    plant.outfall = Product(
+        property_package=m.properties,
+        inlet_names=tuple(
+            f"{stream}_{i}"
+            for i in plant.trains
+            for stream in ("brine", "bypass", "offspec")
+        ),
+        resource_name="outfall",
+    )
+
+    # The delivery obligation, as a horizon-basis limit on a boundary sink. The
+    # bound lands on the scalar `delivery_total`, so it is a volume over the
+    # month and not a profile -- placing it in the cheap hours is the whole
+    # degree of freedom. `min_demand` becomes the mutable Param `delivery_min`,
+    # which is what set_demand rewrites; the value here is only a starting
+    # point. Unpriced, so the objective stays the energy bill alone.
+    plant.potable = Product(
+        property_package=m.properties,
+        resource_name="potable_water",
+        min_demand=demand_m3() * pyunits.m**3,
+        demand_basis="horizon",
+    )
+
+    # The seawater boundary, which meters the intake into total_feed. No
+    # min/max_withdrawal: those build a pair of inequalities, and the intake is a
+    # fixed-duty machine, so the withdrawal is *fixed* below rather than boxed.
+    # Equal limits would pin the same number but leave a column the fix removes.
+    plant.seawater = Feed(
+        property_package=m.properties,
+        resource_name="seawater",
+    )
+
+    # Arcs. `naming_dict` renames a unit's flows and state blocks but never its
+    # ports, so the RO skids are wired through `outlet_a` (permeate) and
+    # `outlet_b` (brine) even though the components read `permeate`/`brine`.
+    plant.seawater_to_intake = Arc(
+        source=plant.seawater.outlet_a,
+        destination=plant.intake_pump.inlet,
+        doc="Raw seawater to the intake pump.",
+    )
+    plant.intake_to_header = Arc(
+        source=plant.intake_pump.outlet,
+        destination=plant.feed_header.inlet,
+        doc="The intake pump's discharge into the feed header.",
+    )
+
+    @plant.Arc(plant.trains, doc="Feed header to each train's pretreatment.")
+    def header_to_pretreatment(b, i):
+        return (
+            plant.feed_header.find_component(f"outlet_t{i}"),
+            plant.pretreatment[i].inlet,
+        )
+
+    @plant.Arc(plant.trains, doc="Pretreated water to this train's RO tee.")
+    def pretreatment_to_split(b, i):
+        return (plant.pretreatment[i].outlet, plant.train_split[i].inlet)
+
+    @plant.Arc(plant.trains, doc="The tee's skid leg into the RO membranes.")
+    def split_to_ro(b, i):
+        return (plant.train_split[i].outlet_ro, plant.ro[i].inlet)
+
+    @plant.Arc(plant.trains, doc="Raw permeate into this train's permeate tee.")
+    def ro_to_permeate_split(b, i):
+        return (plant.ro[i].outlet_a, plant.permeate_split[i].inlet)
+
+    @plant.Arc(plant.trains, doc="On-spec permeate into the permeate header.")
+    def permeate_split_to_header(b, i):
+        return (
+            plant.permeate_split[i].outlet_header,
+            plant.permeate_header.find_component(f"inlet_t{i}"),
+        )
+
+    plant.header_to_post = Arc(
+        source=plant.permeate_header.outlet,
+        destination=plant.post_treatment.inlet,
+        doc="The permeate header into post-treatment.",
+    )
     plant.post_to_product = Arc(
         source=plant.post_treatment.outlet,
         destination=plant.product_pump.inlet,
         doc="Post-treated water to the product pump.",
     )
-    
+    plant.product_to_delivery = Arc(
+        source=plant.product_pump.outlet,
+        destination=plant.potable.inlet_a,
+        doc="Product water across the facility boundary.",
+    )
+
+    # The three streams that leave through the outfall: brine, the water routed
+    # around a skid, and the permeate dumped while post-treatment recuperates.
+    @plant.Arc(plant.trains, doc="Brine to the outfall.")
+    def brine_to_outfall(b, i):
+        return (plant.ro[i].outlet_b, plant.outfall.find_component(f"inlet_brine_{i}"))
+
+    @plant.Arc(plant.trains, doc="Bypassed pretreated water to the outfall.")
+    def bypass_to_outfall(b, i):
+        return (
+            plant.train_split[i].outlet_bypass,
+            plant.outfall.find_component(f"inlet_bypass_{i}"),
+        )
+
+    @plant.Arc(plant.trains, doc="Off-spec permeate to the outfall.")
+    def offspec_to_outfall(b, i):
+        return (
+            plant.permeate_split[i].outlet_offspec,
+            plant.outfall.find_component(f"inlet_offspec_{i}"),
+        )
+
+    # Once, after every arc above is declared -- the transformation only expands
+    # the arcs that exist when it runs.
     pyo.TransformationFactory("network.expand_arcs").apply_to(m)
-    
-    # TODO - replace this constraint with a mixer
-    @plant.Constraint(
-        tb.time_index,
-        doc="Feed header: the intake pump's discharge splits across the trains.",
-    )
-    def feed_header(b, t):
-        return plant.intake_pump.outlet_state.flow_vol_phase[t, "Liq"] == sum(
-            plant.pretreatment[i].inlet_state.flow_vol_phase[t, "Liq"]
-            for i in plant.trains
-        )
-    
-    # TODO - replace this variable and constraint with a splitter
-    # Sized for the whole fixed intake, not for the skid: the header split is
-    # free (see feed_header), so a single train may be handed everything, and
-    # with its skid down the bypass is the only route that water has out. A
-    # bound of rated_feed would make that combination infeasible.
-    plant.ro_bypass = pyo.Var(
-        plant.trains,
-        tb.time_index,
-        domain=pyo.NonNegativeReals,
-        bounds=(0, intake_flow),
-        units=_M3_HR,
-        doc="Pretreated water routed around this train's RO skid, straight to "
-        "the ocean outfall.",
-    )
-
-    @plant.Constraint(
-        plant.trains,
-        tb.time_index,
-        doc="RO bypass tee: pretreated water either feeds the skid or goes "
-        "around it to the outfall.",
-    )
-    def ro_feed_split(b, i, t):
-        return plant.pretreatment[i].flow_out[t] == (
-            plant.ro[i].feed[t] + plant.ro_bypass[i, t]
-        )
-
-    # TODO - replace this variable and constraint with an automatic call to logic
-    plant.permeate_to_header = pyo.Var(
-        plant.trains,
-        tb.time_index,
-        domain=pyo.NonNegativeReals,
-        units=_M3_HR,
-        doc="On-spec permeate each train sends to the post-treatment header.",
-    )
-
-    @plant.Constraint(
-        plant.trains,
-        tb.time_index,
-        doc="A train can send no more to the header than it makes.",
-    )
-    def permeate_to_header_cap(b, i, t):
-        return plant.permeate_to_header[i, t] <= plant.ro[i].permeate[t]
-
-    @plant.Constraint(
-        tb.time_index,
-        doc="Permeate header: the trains' on-spec permeate recombines into "
-        "post-treatment.",
-    )
-    def permeate_header(b, t):
-        return plant.post_treatment.inlet_state.flow_vol_phase[t, "Liq"] == sum(
-            plant.permeate_to_header[i, t] for i in plant.trains
-        )
-
-    @plant.Expression(
-        tb.time_index,
-        doc="Ocean outfall: brine, bypassed pretreated water, and the permeate "
-        "the plant dumps while post-treatment recuperates. Reporting only -- "
-        "every term is already determined, so this adds no degrees of freedom.",
-    )
-    def outfall(b, t):
-        return sum(
-            plant.ro[i].brine[t]
-            + plant.ro_bypass[i, t]
-            + (plant.ro[i].permeate[t] - plant.permeate_to_header[i, t])
-            for i in plant.trains
-        )
 
     # The intake pump and the pretreatment units run whenever the plant does, so
     # their status is pinned at 1 and never becomes a decision. Every one of
@@ -862,13 +945,14 @@ def construct_plant(m):
             unit.status[t].fix(1)
 
     # Fixed-duty intake: the pump has no turndown, so this is a fixed value and
-    # not a bound. It buys nothing but a floor under the outfall -- feed_header
-    # conserves it into the trains, and everything the skids will not take has
-    # to leave through the bypass. Nothing here dictates *how* it splits: an
-    # even third is what the solver reports because every skid can then run at
+    # not a bound. It is set on the seawater Feed's metered withdrawal, which the
+    # arc carries into the pump. It buys nothing but a floor under the outfall:
+    # the feed header conserves it into the trains, and everything the skids will
+    # not take has to leave through the bypass. Nothing dictates *how* it splits:
+    # an even third is what the solver reports because every skid can then run at
     # rated feed, not because the model requires it.
     for t in tb.time_index:
-        plant.intake_pump.flow_in[t].fix(intake_flow)
+        plant.seawater.withdrawal[t].fix(intake_flow)
 
     # Each skid is off, or running anywhere in [min_feed, rated_feed] -- the
     # plant's whole scheduling freedom, and what makes this a MILP. The
@@ -913,7 +997,9 @@ def construct_plant(m):
         # it enforces the whole [t-k, t] window instead of lagging the upstream
         # status by k. As shipped it samples only status[t-k], so a system that
         # restarts inside the window passes, and it never checks status[t] at
-        # all -- post-treatment could run with every skid off.
+        # all -- post-treatment could run with every skid off. Re-checked against
+        # flex-pse main at 50ff1d8: still a single lagged sample, so this stays
+        # the one constraint in the flowsheet written out by hand.
         #
         # ro[0] stands in for the whole RO system: the symmetry breaking below
         # makes it the last skid off and the first back on. startup is indexed
@@ -926,15 +1012,21 @@ def construct_plant(m):
 
     # Interchangeable skids make the MILP degenerate: many equal-cost solutions
     # differ only in which skid is on. Pin the order -- skid 2 only runs if 1 is
-    # running, skid 1 only if 0 is. register_parallel_group chains "units[i] on
-    # implies units[i+1] on", so the skids go in last-first.
+    # running, skid 1 only if 0 is.
     #
-    # The reversal is load-bearing, and flex-pse issue #64 is about to make it
-    # wrong: register_parallel_group and break_parallel_symmetry take opposite
-    # list orders today, and #64 resolves by reversing register_parallel_group
-    # to match. Drop the reversed() when that lands, or this chain inverts
-    # silently and ro[0] becomes the *first* skid off.
-    register_parallel_group([plant.ro[i] for i in reversed(list(plant.trains))])
+    # The list goes lead-first. register_parallel_group takes its units in
+    # priority order and chains them descending:
+    #
+    #     units[0].status[t] >= units[1].status[t] >= ... >= units[-1].status[t]
+    #
+    # so ro[0] is the last skid off and the first back on, which is what lets
+    # post_treatment_recuperation use it as the proxy for the whole RO system.
+    #
+    # This call used to pass reversed(), because the ordering ran the other way
+    # before flex-pse #64. That was fixed in #76 (commit bc69357) and the
+    # reversal came out with it -- putting it back would silently make ro[0] the
+    # *first* skid off and quietly decouple the recuperation window.
+    register_parallel_group([plant.ro[i] for i in plant.trains])
 
     # The lead pair. Symmetry breaking alone leaves four plant states -- 3, 2, 1
     # or 0 skids online -- and a single skid running is not one the plant has:
@@ -954,13 +1046,13 @@ def construct_plant(m):
     # two on at the exact step post-treatment returns. Every restart in the
     # solved month did that. With the lead pair the window costs two trains'
     # permeate and the restart reads as a real one.
-    @plant.Constraint(
-        tb.time_index,
-        doc="Lead pair: ro[0] and ro[1] start and stop together, so the plant "
-        "runs 3 trains, 2 trains, or none -- never a single skid.",
-    )
-    def lead_pair(b, t):
-        return plant.ro[0].status[t] <= plant.ro[1].status[t]
+    #
+    # "ro[0] on implies ro[1] on" is what add_conditional writes, as
+    # ro[1].status[t] >= ro[0].status[t]. It lands on ro[0] as
+    # ``ro[0].conditional``; register_parallel_group puts its own ``conditional``
+    # on the *later* unit of each pair, so ro[1] and ro[2] carry those and there
+    # is no collision.
+    add_conditional(plant.ro[0], plant.ro[1], then="on")
 
 
 def peak_window_hours() -> list[int]:
@@ -1032,7 +1124,7 @@ def results_frame(m):
         data[f"ro{i}_status"] = [status(i, t) for t in ti]
         data[f"ro{i}_startup"] = [startup(i, t) for t in ti]
         data[f"ro{i}_bypass_m3_per_hr"] = [
-            pyo.value(plant.ro_bypass[i, t]) for t in ti
+            pyo.value(plant.train_split[i].flow_out_bypass[t]) for t in ti
         ]
 
     data["trains_online"] = [sum(status(i, t) for i in trains) for t in ti]
@@ -1049,30 +1141,33 @@ def results_frame(m):
     data["permeate_m3_per_hr"] = [
         sum(pyo.value(plant.ro[i].permeate[t]) for i in trains) for t in ti
     ]
+    # The permeate header's own outlet, rather than a sum over the trains: the
+    # Mixer already carries it.
     data["onspec_permeate_m3_per_hr"] = [
-        sum(pyo.value(plant.permeate_to_header[i, t]) for i in trains) for t in ti
+        pyo.value(plant.permeate_header.flow_out[t]) for t in ti
     ]
     # Off-spec permeate is diverted into the brine line, so the outfall carries
     # both. Reported apart as well, since it is the recuperation penalty made
-    # visible: water the plant paid full power to make and then threw away.
+    # visible: water the plant paid full power to make and then threw away. It
+    # used to be computed as permeate minus what reached the header; the permeate
+    # tee now names it outright.
     data["offspec_permeate_m3_per_hr"] = [
-        sum(
-            pyo.value(plant.ro[i].permeate[t] - plant.permeate_to_header[i, t])
-            for i in trains
-        )
+        sum(pyo.value(plant.permeate_split[i].flow_out_offspec[t]) for i in trains)
         for t in ti
     ]
     data["bypass_m3_per_hr"] = [
-        sum(pyo.value(plant.ro_bypass[i, t]) for i in trains) for t in ti
+        sum(pyo.value(plant.train_split[i].flow_out_bypass[t]) for i in trains)
+        for t in ti
     ]
     data["brine_m3_per_hr"] = [
         sum(pyo.value(plant.ro[i].brine[t]) for i in trains) for t in ti
     ]
-    # The Expression the flowsheet already carries: brine + bypass + off-spec.
-    data["outfall_m3_per_hr"] = [pyo.value(plant.outfall[t]) for t in ti]
-    data["product_m3_per_hr"] = [
-        pyo.value(plant.product_pump.outlet_state.flow_vol_phase[t, "Liq"]) for t in ti
-    ]
+    # The outfall block's metered discharge: brine + bypass + off-spec, summed by
+    # the Product rather than by an Expression written here.
+    data["outfall_m3_per_hr"] = [pyo.value(plant.outfall.delivery[t]) for t in ti]
+    # Read off the boundary block the obligation is written against, so the
+    # column and the constraint cannot drift apart.
+    data["product_m3_per_hr"] = [pyo.value(plant.potable.delivery[t]) for t in ti]
     data["intake_pump_kw"] = [
         pyo.value(plant.intake_pump.power_electrical[t]) for t in ti
     ]
@@ -1102,7 +1197,7 @@ def results_frame(m):
     # Set last: attrs do not survive every pandas operation, and the mask above
     # is one that returns a new frame.
     frame.attrs["demand_af"] = m.demand_af
-    frame.attrs["demand_m3"] = pyo.value(m.demand_volume)
+    frame.attrs["demand_m3"] = pyo.value(m.plant.potable.delivery_min)
     return frame
 
 

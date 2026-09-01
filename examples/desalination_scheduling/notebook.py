@@ -234,11 +234,10 @@ def _(m, mo, model, pyo, pyunits, results):
     plant = m.plant
     dt = pyo.value(pyunits.convert(tb.dt, pyunits.hr))
 
-    demand_m3 = pyo.value(m.demand_volume)
+    demand_m3 = pyo.value(plant.potable.delivery_min)
     capacity_af = model.max_product_af()
     product_m3 = dt * sum(
-        pyo.value(plant.product_pump.outlet_state.flow_vol_phase[t, "Liq"])
-        for t in tb.time_index
+        pyo.value(plant.potable.delivery[t]) for t in tb.time_index
     )
     power_kw = {
         t: pyo.value(m.costing.aggregate_power[t, "electrical"])
@@ -261,7 +260,7 @@ def _(m, mo, model, pyo, pyunits, results):
     # they were penalised restarts.
     restarts = sum(pyo.value(plant.ro[0].startup[t]) for t in plant.ro[0].startup)
     offspec_m3 = dt * sum(
-        pyo.value(plant.ro[i].permeate[t] - plant.permeate_to_header[i, t])
+        pyo.value(plant.permeate_split[i].flow_out_offspec[t])
         for i in plant.trains
         for t in tb.time_index
     )

@@ -26,7 +26,7 @@ execute = true
 
 [solve]
 solver = "gurobi"
-runtime_minutes = 3
+runtime_minutes = 7
 # The exact month is a non-convex MIQCP: unfixed RO recovery makes
 # `permeate == recovery * feed` bilinear, so it needs Gurobi's spatial branch and
 # bound and HiGHS cannot take the problem at all. No Gurobi license on a public

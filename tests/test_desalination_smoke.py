@@ -181,12 +181,14 @@ def test_no_permeate_reaches_the_header_while_post_treatment_is_out(solved):
     """With post-treatment out, *every* train's permeate goes to the outfall.
 
     This is the recuperation penalty, and the direction the model actually
-    constrains: `permeate_to_header` is bounded by post-treatment's status, so a
+    constrains: the permeate tee's `outlet_header` leg feeds the permeate header
+    and so is bounded by post-treatment's status, so a
     step with post-treatment off and any on-spec permeate would mean the
     recuperation window had come loose from the permeate split.
 
     The converse does **not** hold, and asserting it would give a flaky test.
-    `offspec = permeate - permeate_to_header`, and nothing forbids diverting
+    the permeate tee splits `permeate == header + offspec`, and nothing forbids
+    diverting
     permeate while post-treatment runs. In practice that leaves a degenerate
     optimum: solving this instance at a 1%, a 0.1% and a 0% gap gives the same
     objective (7284.1) and the same total off-spec volume (1002.9 m3), but
