@@ -85,28 +85,49 @@ jobs:
       - name: Install the project
         run: uv sync --group dev
 
-      # Print what upstream actually resolved to. When this job goes red, the
-      # first question is always "against which flexPSE?", and the answer should
-      # be in the log rather than in a bisect.
+      # Purely diagnostic: when this job goes red the first question is always
+      # "against which flexPSE?", and the answer belongs in the log rather than
+      # in a bisect. It must never be the thing that turns the job red -- a
+      # missing flex-pse is caught loudly by Solve below. Mirrors the defensive
+      # lookup in tools/sweep.py::_flexpse_provenance().
       - name: Record the resolved flexPSE commit
         run: |
           uv run --no-sync python - <<'PY'
           import importlib.metadata as md, json
-          dist = md.distribution("flex-pse")
-          print("flex-pse", dist.version)
-          raw = dist.read_text("direct_url.json")
-          if raw:
-              info = json.loads(raw)
-              print("url   ", info.get("url"))
-              print("commit", info.get("vcs_info", {}).get("commit_id", "?"))
+
+          try:
+              dist = md.distribution("flex-pse")
+          except md.PackageNotFoundError:
+              print("flex-pse not installed")
+          else:
+              print("flex-pse", dist.version)
+              try:
+                  raw = dist.read_text("direct_url.json")
+                  if raw:
+                      info = json.loads(raw)
+                      print("url   ", info.get("url"))
+                      print("commit", info.get("vcs_info", {}).get("commit_id", "?"))
+              except (OSError, json.JSONDecodeError):
+                  print("commit unresolved")
           PY
 
+      # The import is a real precondition -- without a solver the solves below
+      # are theatre, so it fails hard. The version is decoration and must not:
+      # `highspy.__version__` disappeared upstream and took this job, and via
+      # `needs: solve` the drift job with it, down for a week while the real
+      # test suite never ran once.
       - name: Solvers available
         run: |
-          uv run --no-sync python -c "
-          import importlib.metadata, highspy
-          print('highspy', importlib.metadata.version('highspy'))
-          "
+          uv run --no-sync python - <<'PY'
+          import importlib.metadata as md
+          import highspy  # noqa: F401 -- the assertion is that this imports
+
+          try:
+              version = md.version("highspy")
+          except md.PackageNotFoundError:
+              version = "unknown"
+          print("highspy", version)
+          PY
 
       - name: Solve
         run: uv run --no-sync pytest -q tests/
