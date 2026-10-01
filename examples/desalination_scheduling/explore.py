@@ -42,15 +42,7 @@ def _(mo):
     # Desalination scheduling: what a monthly obligation costs
 
     A seawater plant with three parallel treatment trains, scheduled against a
-    time-of-use tariff:
-
-    ```
-                       ┌─► pretreatment[0] ─► RO[0] ─┬─► brine ─► ocean
-    seawater ─► intake ─┼─► pretreatment[1] ─► RO[1] ─┤        (permeate)
-                 pump   └─► pretreatment[2] ─► RO[2] ─┘            │
-                                                                   ▼
-      product water ◄─ product pump ◄─ post-treatment ◄─ permeate header
-    ```
+    time-of-use tariff.
 
     The plant owes a **volume** of product water over the month — not an hourly
     profile — and there is no storage in the flowsheet. So the only way to dodge
@@ -65,6 +57,14 @@ def _(mo):
     a unit-commitment problem with roughly 27,000 binaries.
     """
     )
+    return
+
+
+@app.cell
+def _(DATA, mo):
+    # Rendered offline from diagram.py by tools/render_diagrams.py and committed
+    # beside the sweep data -- the renderer is not something Pyodide installs.
+    mo.image(src=f"{DATA}/flowsheet.svg", alt="Process flow diagram of the desalination plant")
     return
 
 
