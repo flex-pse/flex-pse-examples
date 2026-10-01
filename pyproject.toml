@@ -37,15 +37,19 @@ dev = ["pytest", "jinja2>=3.1", "ruff"]
 [tool.setuptools]
 packages = [
   "flex_pse_examples",
+  "flex_pse_examples.diagrams",
   "flex_pse_examples.examples",
   "flex_pse_examples.examples.desalination_scheduling",
   "flex_pse_examples.examples.pump_scheduling",
 ]
 
 [tool.setuptools.package-data]
+"flex_pse_examples.diagrams" = ["icons.json"]
 "flex_pse_examples.examples.desalination_scheduling" = [
   "config.json", "example.toml", "public/desalination_scheduling/*.parquet",
+  "public/desalination_scheduling/flowsheet.svg",
 ]
 "flex_pse_examples.examples.pump_scheduling" = [
   "config.json", "example.toml", "public/pump_scheduling/*.parquet",
+  "public/pump_scheduling/flowsheet.svg",
 ]

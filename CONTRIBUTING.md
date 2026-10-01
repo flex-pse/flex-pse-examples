@@ -205,3 +205,22 @@ Regenerate a sweep whenever the model behind it changes. Nothing will remind you
 - **matplotlib is `agg`-only** in the browser. Return the `Figure` from a cell
   rather than calling `plt.show()`, and keep box-drawing characters out of chart
   labels — DejaVu Sans has no glyphs for them.
+
+## The flowsheet diagram
+
+Each example draws its flowsheet from the shared icon library in
+`flex_pse_examples/diagrams/` rather than as ASCII art. Describe it in
+`examples/<name>/diagram.py`: `NODES` place units on a grid (column `c`, row `r`),
+`EDGES` connect `"node.port"` refs (ports `n/e/s/w`) with a flow type
+(`fluid`, `gas`, `electricity`, `heat`). Available icons are the ids in
+`icons.json`; add a `"terminal"` node for a source or sink and a `"junction"` for
+a header.
+
+`notebook.py` renders it live. `explore.py` cannot import the renderer, so it
+shows `public/<name>/flowsheet.svg`, which you regenerate with:
+
+```
+python tools/render_diagrams.py
+```
+
+`tests/test_diagrams.py` fails if a ref is wrong or the committed SVG is stale.

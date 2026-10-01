@@ -22,9 +22,11 @@ def _():
     if str(here) not in sys.path:
         sys.path.insert(0, str(here))
 
+    import diagram
     import model
+    from flex_pse_examples.diagrams import render as render_diagram
 
-    return mo, model, pyo, pyunits
+    return diagram, mo, model, pyo, pyunits, render_diagram
 
 
 @app.cell
@@ -37,14 +39,6 @@ def _(mo, model):
     [`model.py`](model.py) rather than assembled from `config.json` — only the
     tariff still comes from the config file, since it is ~80 EECO rate rows and
     there is no code form for it yet.
-
-    ```
-                       ┌─► pretreatment[0] ─► RO[0] ─┬─► brine ─► ocean
-    seawater ─► intake ─┼─► pretreatment[1] ─► RO[1] ─┤        (permeate)
-                 pump   └─► pretreatment[2] ─► RO[2] ─┘            │
-                                                                   ▼
-      product water ◄─ product pump ◄─ post-treatment ◄─ permeate header
-    ```
 
     The plant owes a **volume** of product water over the month, and nothing says
     *when*. There is no product storage in the flowsheet, so the only way to
@@ -75,6 +69,15 @@ def _(mo, model):
     flat out and the tariff is simply a bill, and the further below it the demand
     sits, the more of the peak window the optimizer can afford to sit out.
     """)
+    return
+
+
+@app.cell
+def _(diagram, mo, render_diagram):
+    # The flowsheet, assembled from the flex_pse_examples.diagrams icon library.
+    # Edit NODES/EDGES in diagram.py, then run tools/render_diagrams.py so the
+    # WebAssembly page's copy (public/<name>/flowsheet.svg) stays in step.
+    mo.Html(render_diagram(diagram.NODES, diagram.EDGES))
     return
 
 
