@@ -1,4 +1,4 @@
-"""Interactive marimo notebook entrypoint for the pump scheduling example."""
+"""Pump scheduling: builds and solves the model locally."""
 
 import marimo
 
@@ -30,42 +30,27 @@ def _():
 @app.cell
 def _(mo):
     mo.md(r"""
-    # Pump scheduling: does flexibility substitute for storage?
+    # Pump scheduling
 
-    A two-pump water plant on a time-of-use tariff, and one question:
-
-    > Would you rather have a **bigger battery for an inflexible facility**, or a
-    > **smaller battery for a flexible one**?
+    **Is it better to buy a bigger battery, or to let the pumps run flexibly?**
 
     ```
-    feed pump  ──►  storage tank  ──►  product pump  ──►  user / product flow
-    (the strategy    (buffer)          (follows demand)
-     variable)
-                         battery ── large, or small
+    feed pump ──► tank ──► product pump ──► demand
+                                    battery ──┘ (on the electric side)
     ```
 
-    The two strategies for the **feed pump**:
+    Two ways to run the feed pump:
 
-    * **Inflexible** — a 100% duty cycle. The pump never shuts off and never
-      modulates: it is pinned for the whole horizon at the single constant flow
-      that meets the day's demand.
-    * **Flexible** — the pump is off, or running anywhere between
-      **60% and 100%** of rated flow, and the optimizer picks the hourly
-      schedule against the tariff. "Off, or somewhere in a band" is a
-      semicontinuous variable — `flexops.logic.add_status` attaches the on/off
-      binary and the two links that pin flow to it, which makes this a MILP.
+    - **Inflexible**: one constant flow all day, just enough to meet demand.
+    - **Flexible**: off, or anywhere from 60% to 100% of rated flow. The
+      optimizer picks the hours. (The on/off decision comes from
+      `flexops.logic.add_status`, which makes this a MILP.)
 
-    Crossed with two battery sizes, that is a **2×2**. Because the inflexible
-    duty is set by the water balance rather than by rated flow, every one of the
-    four cases moves the *same* water and buys the *same* total pump energy — so
-    the whole cost difference is a matter of **when** that energy is bought.
+    The product pump just follows demand. Each strategy gets a small and a large
+    battery, so there are four cases. All four pump the same water with the same
+    energy, so the only difference in cost is *when* that energy gets bought.
 
-    The **product pump** draws from the tank to meet the user demand profile
-    across a fixed pressure differential. Its flow is fixed by demand, so it is
-    an inflexible load under either strategy.
-
-    Everything below is driven by `config.json`; the model wiring lives in
-    `model.py`.
+    Inputs are in `config.json` and the model is in `model.py`.
     """)
     return
 
@@ -81,22 +66,22 @@ def _(mo, model):
 
     mo.md(
         f"""
-        ## The plant, from `config.json`
+        ## The plant
 
         | | |
         |---|---|
         | Horizon | `{cfg["time"]["start_date"]}` → `{cfg["time"]["end_date"]}` at {cfg["time"]["time_step_hours"]} h steps |
         | Feed pump | {cfg["feed_pump"]["rated_flow_m3_per_hr"]:.0f} m³/hr rated, flexible over {cfg["feed_pump"]["min_flow_fraction"]:.0%}–100%, Δp = {cfg["feed_pump"]["delta_pressure_bar"]:.1f} bar, η = {cfg["feed_pump"]["efficiency"]:.2f} |
-        | Inflexible duty | **{flat_duty:.1f} m³/hr** held every hour — {flat_duty / cfg["feed_pump"]["rated_flow_m3_per_hr"]:.0%} of rated, the flow that closes the day's water balance |
+        | Inflexible duty | **{flat_duty:.1f} m³/hr** all day ({flat_duty / cfg["feed_pump"]["rated_flow_m3_per_hr"]:.0%} of rated) |
         | Tank | {cfg["tank"]["max_volume_m3"]:.0f} m³ max, starting at {cfg["tank"]["initial_volume_m3"]:.0f} m³, level held in [{cfg["tank"]["level_min"]:.2f}, {cfg["tank"]["level_max"]:.2f}] |
         | Product pump | follows demand, Δp = {cfg["product_pump"]["delta_pressure_bar"]:.1f} bar, η = {cfg["product_pump"]["efficiency"]:.2f} |
         | Product demand | {min(cfg["product_demand_m3_per_hr"]):.0f}–{max(cfg["product_demand_m3_per_hr"]):.0f} m³/hr, {sum(cfg["product_demand_m3_per_hr"]):.0f} m³ over the horizon |
         | Peak window | {peak_hours[0]:02d}:00–{peak_hours[-1] + 1:02d}:00, energy at 4.5× the off-peak price plus a demand charge |
-        | **Plant peak load** | **{peak_kw:.1f} kW** — the basis battery sizing is quoted against |
+        | **Plant peak load** | **{peak_kw:.1f} kW** (battery sizes are a % of this) |
 
-        The **large** battery is {_sizes["large"]:.0%} of that peak load —
-        **{_sizes["large"] * peak_kw:.1f} kW / {_sizes["large"] * peak_kw * _duration:.0f} kWh** —
-        and the **small** one {_sizes["small"]:.0%}, or
+        Large battery: {_sizes["large"]:.0%} of peak load,
+        **{_sizes["large"] * peak_kw:.1f} kW / {_sizes["large"] * peak_kw * _duration:.0f} kWh**.
+        Small battery: {_sizes["small"]:.0%},
         **{_sizes["small"] * peak_kw:.1f} kW / {_sizes["small"] * peak_kw * _duration:.0f} kWh**.
         """
     )
@@ -158,20 +143,17 @@ def _():
 @app.cell
 def _(mo):
     mo.md("""
-    ## The headline: the 2×2
+    ## The four cases
 
-    Each column is a feed pump strategy, each line a battery size. The top row
-    is what the pump is doing; the bottom row is what the meter sees.
+    Top row is the feed pump, bottom row is what the meter sees. Shaded hours
+    are the peak window.
 
-    The inflexible pump is a flat line by construction, so its battery is the
-    *only* thing standing between the plant and the peak window — and a small
-    one runs out. The flexible pump pre-fills the tank and switches off for the
-    whole window, leaving only the product pump for the battery to carry.
+    The inflexible pump can't stop, so the battery has to carry it through the
+    peak, and the small battery runs out. The flexible pump fills the tank
+    early and switches off for the whole peak window.
 
-    (Hour 0 is the tank's initial-state snapshot: `Tank`'s holdup equation is a
-    backward difference, so flow there never enters the water balance. The feed
-    pump is pinned off at hour 0 under *both* strategies, so neither is billed
-    for water that the model would otherwise let vanish.)
+    (Hour 0 is the tank's starting state, so the feed pump is off there in
+    every case.)
     """)
     return
 
@@ -196,8 +178,8 @@ def _(
     )
     fig.patch.set_facecolor(SURFACE)
 
-    _columns = [("Inflexible — 100% duty cycle", inflexible),
-                ("Flexible — scheduled against the tariff", flexible)]
+    _columns = [("Inflexible: constant flow", inflexible),
+                ("Flexible: scheduled around the tariff", flexible)]
     _rated = cfg["feed_pump"]["rated_flow_m3_per_hr"]
     _flow_top = _rated * 1.24
     # Headroom above the tallest trace so the stacked direct labels below have
@@ -234,7 +216,7 @@ def _(
             # each line, which would collide when the two draws are close and
             # run off the axis when they are high.
             _grid_ax.annotate(
-                f"{_s['sizing']} battery — {_s['peak_window_grid_kw']:.1f} kW in peak",
+                f"{_s['sizing']} battery: {_s['peak_window_grid_kw']:.1f} kW in peak",
                 (23.4, _grid_top * (0.95 - 0.105 * _i)),
                 color=_color, fontsize=8, va="center", ha="right",
             )
@@ -301,7 +283,7 @@ def _(BLUE, INK, MUTED, ORANGE, SIZE_COLOR, SURFACE, plt, scenarios, style):
     ax2.legend(frameon=False, fontsize=8, labelcolor=MUTED, ncols=2,
                loc="lower right")
     ax2.set_xlabel("operating cost over the horizon ($)", color=MUTED, fontsize=9)
-    ax2.set_title("Horizon operating cost — flexibility beats battery size",
+    ax2.set_title("Cost for the day: flexibility beats a bigger battery",
                   color=INK, fontsize=10, loc="left", pad=8)
     fig2
     return
@@ -331,10 +313,9 @@ def _(mo, scenarios):
 @app.cell
 def _(base, mo):
     mo.md(f"""
-    ## One schedule in full — {base["label"]}
+    ## One case up close: {base["label"]}
 
-    Shaded bands mark the peak window. Set `scenarios.selected` in
-    `config.json` to render a different corner of the 2×2 here.
+    Change `scenarios.selected` in `config.json` to look at a different case.
     """)
     return
 
@@ -384,7 +365,7 @@ def _(
     for _level, _text, _va in (
         (rated, "100% rated", "center"),
         (flat_duty, "inflexible duty", "bottom"),
-        (rated * cfg["feed_pump"]["min_flow_fraction"], "60% — min when on", "top"),
+        (rated * cfg["feed_pump"]["min_flow_fraction"], "60% (min when on)", "top"),
     ):
         # hlines, not axhline: the line must stop at the data edge so it does
         # not run under its own margin label.
@@ -397,7 +378,7 @@ def _(
             lw=2, label="product demand")
     ax.legend(frameon=False, fontsize=8, labelcolor=MUTED, ncols=2,
               loc="upper left", bbox_to_anchor=(0, 0.99))
-    ax.set_title("Flows — the feed pump is off, or inside its 60–100% band",
+    ax.set_title("Flows: the feed pump is off, or between 60 and 100%",
                  color=INK, fontsize=10, loc="left", pad=10)
 
     # -- tank volume (m3) ----------------------------------------------------
@@ -411,7 +392,7 @@ def _(
     ax.plot(hours, frame["tank_volume_m3"], color=BLUE, lw=2)
     ax.annotate("allowed\nlevel band", (24.1, cfg["tank"]["level_max"] * max_volume),
                 color=MUTED, fontsize=7.5, va="top", ha="left")
-    ax.set_title("Tank volume — filled before the peak, drained through it",
+    ax.set_title("Tank: fills up before the peak, drains through it",
                  color=INK, fontsize=10, loc="left", pad=10)
 
     # -- power (kW) ----------------------------------------------------------
@@ -430,7 +411,7 @@ def _(
     ax.legend(frameon=False, fontsize=8, labelcolor=MUTED, ncols=4,
               loc="upper left", bbox_to_anchor=(0, 0.99))
     ax.set_title(
-        f"Plant power — {base['label']} "
+        f"Plant power: {base['label']} "
         "(net grid draw = stack less battery discharge)",
         color=INK, fontsize=10, loc="left", pad=10,
     )
@@ -448,7 +429,7 @@ def _(
                 color=AQUA, fontsize=8, va="center")
     ax.annotate(f"discharging  ▼ {-_net.min():.0f} kW", (0.3, -_span * 0.72),
                 color=AQUA, fontsize=8, va="center")
-    ax.set_title("Battery — charges off-peak, carries the plant through the peak",
+    ax.set_title("Battery: charges off-peak, runs the plant through the peak",
                  color=INK, fontsize=10, loc="left", pad=10)
 
     axes3[-1].set_xlabel("hour of day", color=MUTED, fontsize=9)
@@ -463,9 +444,7 @@ def _(
 @app.cell
 def _(mo):
     mo.md("""
-    ## The full solved schedule
-
-    The table view — every decision variable the charts summarise.
+    ## Same schedule, as a table
     """)
     return
 
@@ -484,40 +463,23 @@ def _(by_label, mo):
     _fs = by_label["flexible + small battery"]
 
     mo.md(f"""
-    ## What the model shows
+    ## Takeaways
 
-    1. **The smaller battery on the flexible facility wins outright.** It runs at
-       **\\${_fs["operating_cost"]:.2f}** against **\\${_il["operating_cost"]:.2f}**
-       for the large battery on the inflexible facility — cheaper to operate
-       *and* {(1 - _fs["battery_kw"] / _il["battery_kw"]):.0%} less battery to
-       buy. That is the answer to the question this example asks.
+    1. **The flexible plant with the small battery wins.** \\${_fs["operating_cost"]:.2f}
+       a day, vs. \\${_il["operating_cost"]:.2f} for the inflexible plant with the
+       large battery, using {(1 - _fs["battery_kw"] / _il["battery_kw"]):.0%} less
+       battery.
+    2. **Flexibility and storage do the same job.** Going from the small to the
+       large battery saves \\${_is_["operating_cost"] - _il["operating_cost"]:.2f}
+       on the inflexible plant, but only
+       \\${_fs["operating_cost"] - _fl["operating_cost"]:.2f} on the flexible one.
+       The flexible schedule already moved the load the battery would have covered.
+    3. **It's about timing, not efficiency.** Every case pumps
+       {_fs["frame"]["feed_flow_m3_per_hr"].sum():.0f} m³ using
+       {_fs["frame"]["feed_pump_kw"].sum():.0f} kWh.
 
-    2. **Flexibility and storage are substitutes, not complements.** Upgrading
-       the *inflexible* plant from the small battery to the large one is worth
-       **\\${_is_["operating_cost"] - _il["operating_cost"]:.2f}**. Making the
-       same upgrade on the *flexible* plant is worth only
-       **\\${_fs["operating_cost"] - _fl["operating_cost"]:.2f}**, because the
-       schedule has already removed the load the battery would have covered.
-
-    3. **What each strategy leaves for the battery to carry.** The inflexible
-       pump draws its constant duty straight through the peak window, so the
-       battery has to cover both pumps; the small one runs out of energy and
-       still leaves **{_is_["peak_window_grid_kw"]:.1f} kW** of billable demand.
-       The flexible pump pre-fills the tank and shuts off for the whole window,
-       leaving only the product pump — which even the small battery carries to
-       **{_fs["peak_window_grid_kw"]:.2f} kW**.
-
-    4. **None of this is an energy-efficiency story.** All four cases pump the
-       same **{_fs["frame"]["feed_flow_m3_per_hr"].sum():.0f} m³** and buy the
-       same **{_fs["frame"]["feed_pump_kw"].sum():.0f} kWh** of feed pump energy.
-       The entire spread is *when* that energy is bought, priced by the peak
-       energy rate and the demand charge.
-
-    Note these are **operating** costs only: `FlexCosting`'s capital block is a
-    v0 placeholder, so the large battery carries no capital penalty here. That
-    understates the result rather than flattering it — the smaller battery
-    already wins on operating cost alone, before its lower capital cost is
-    counted at all.
+    These are operating costs only. Capital cost isn't modeled yet, which would
+    only make the small battery look better.
     """)
     return
 

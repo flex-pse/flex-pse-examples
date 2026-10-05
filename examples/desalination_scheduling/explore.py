@@ -4,12 +4,9 @@
 # ///
 """Desalination scheduling: the WebAssembly page.
 
-This notebook ships to the browser, so it may import nothing that Pyodide cannot
-install -- no pyomo, no flexops, no sibling `model`. It reads the sweep that
-`tools/sweep.py` solved offline and committed under `public/`, and everything it
-draws is DuckDB, pandas and matplotlib over those Parquet files.
-
-`tools/site/build.py` enforces that with an import allowlist; see CONTRIBUTING.md.
+Runs in the browser, so it can only import what Pyodide has -- no pyomo, no
+flexops, no sibling `model`. Everything here is DuckDB + matplotlib over the
+Parquet files `tools/sweep.py` committed under `public/`. See CONTRIBUTING.md.
 """
 
 import marimo
@@ -25,66 +22,96 @@ def _():
     import matplotlib.dates as mdates
     import matplotlib.pyplot as plt
     import numpy as np
+    import pandas as pd
 
-    #: Where `tools/sweep.py` wrote this example's data. `mo.notebook_location()`
-    #: is the notebook's directory locally and the exported page's directory in
-    #: the browser, so one f-string covers both. The name is doubled because
-    #: every example's `public/` merges into one directory in the export.
+    # `notebook_location()` is a path locally and a URL in the browser. The name
+    # is doubled because every example's `public/` merges into one directory.
     EXAMPLE = "desalination_scheduling"
     DATA = f"{mo.notebook_location()}/public/{EXAMPLE}"
-    return DATA, EXAMPLE, duckdb, mdates, mo, np, plt
+    return DATA, EXAMPLE, duckdb, mdates, mo, np, pd, plt
+
+
+@app.cell
+def _():
+    BLUE, ORANGE = "#2a78d6", "#eb6834"
+    INK, MUTED, GRID, AXIS = "#0b0b0b", "#898781", "#e1e0d9", "#c3c2b7"
+    SURFACE, PEAK = "#fcfcfb", "#f0efec"
+
+    def style(ax, ylabel=""):
+        ax.set_ylabel(ylabel, color=MUTED, fontsize=9)
+        ax.set_facecolor(SURFACE)
+        ax.grid(True, axis="y", color=GRID, lw=0.8)
+        ax.set_axisbelow(True)
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+        for side in ("left", "bottom"):
+            ax.spines[side].set_color(AXIS)
+        ax.tick_params(colors=MUTED, labelsize=8)
+        return ax
+
+    return BLUE, INK, MUTED, ORANGE, PEAK, SURFACE, style
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
-    # Desalination scheduling: what a monthly obligation costs
+    mo.md(r"""
+    # Desalination scheduling
 
-    A seawater plant with three parallel treatment trains, scheduled against a
-    time-of-use tariff:
+    **How does a monthly water target change what the water costs?**
 
-    ```
-                       ┌─► pretreatment[0] ─► RO[0] ─┬─► brine ─► ocean
-    seawater ─► intake ─┼─► pretreatment[1] ─► RO[1] ─┤        (permeate)
-                 pump   └─► pretreatment[2] ─► RO[2] ─┘            │
-                                                                   ▼
-      product water ◄─ product pump ◄─ post-treatment ◄─ permeate header
-    ```
+    A seawater plant with three reverse osmosis trains has to deliver a set
+    volume of water each month. When it makes that water is up to the plant,
+    and there's no storage. Power costs 4.5× more from 4pm to 9pm. Restarting
+    has a cost too: for the first 45 minutes after a restart, everything the
+    plant makes is off-spec and goes back to the ocean.
 
-    The plant owes a **volume** of product water over the month — not an hourly
-    profile — and there is no storage in the flowsheet. So the only way to dodge
-    an expensive hour is to make less water in it and more water elsewhere.
+    We solved a full month at 15-minute steps for targets from half of what
+    the plant can make up to nearly all of it.
+    """)
+    return
 
-    Stepping the train count down from three to two is free. Restarting the RO
-    *system* is not: for 45 minutes afterwards post-treatment is out, and every
-    train's permeate — not just the restarting one's — leaves off-spec to the
-    outfall while the plant pays full power to make it.
 
-    Each point below is a full calendar month at 15-minute resolution, solved as
-    a unit-commitment problem with roughly 27,000 binaries.
-    """
-    )
+@app.cell
+def _(BLUE, INK, MUTED, SURFACE, np, plt):
+    def _diagram():
+        fig, ax = plt.subplots(figsize=(8, 1.6))
+        fig.patch.set_facecolor(SURFACE)
+        ax.set_axis_off()
+        ax.set_xlim(0, 1)
+        ax.set_ylim(0, 1)
+        unit = {"boxstyle": "round,pad=0.6", "fc": "#eef4fc", "ec": BLUE, "lw": 1}
+        arrow = {"arrowstyle": "-|>", "color": MUTED, "lw": 1.2, "shrinkA": 9, "shrinkB": 9}
+
+        steps = ["seawater", "intake", "3 RO trains", "post-treatment", "product water"]
+        xs = np.linspace(0.07, 0.93, len(steps))
+        nodes = [
+            ax.text(x, 0.75, s, ha="center", va="center", fontsize=9, color=INK,
+                    bbox=unit if 0 < i < len(steps) - 1 else None)
+            for i, (x, s) in enumerate(zip(xs, steps))
+        ]
+        brine = ax.text(xs[2], 0.15, "brine to the ocean", ha="center", va="center",
+                        fontsize=9, color=INK)
+        for a, b in zip(nodes, nodes[1:]):
+            ax.annotate("", xy=(0, 0.5), xycoords=b, xytext=(1, 0.5), textcoords=a,
+                        arrowprops=arrow)
+        ax.annotate("", xy=(0.5, 1), xycoords=brine, xytext=(0.5, 0), textcoords=nodes[2],
+                    arrowprops=arrow)
+        return fig
+
+    _diagram()
     return
 
 
 @app.cell
 def _(EXAMPLE, mo):
-    _repo = "https://github.com/flex-pse/flex-pse-examples"
+    _repo = f"https://github.com/flex-pse/flex-pse-examples/tree/main/examples/{EXAMPLE}"
     mo.callout(
         mo.md(
             f"""
-    **This page replays precomputed results.** The optimization behind it needs
-    Pyomo, IDAES and Gurobi — the exact month is a non-convex MIQCP, since
-    unfixed RO recovery makes `permeate == recovery × feed` bilinear — and none
-    of that runs in a browser. What you are selecting between are months solved
-    offline and committed to the repository.
-
-    For the model, the solver-level notebook and the code, see
-    [`examples/{EXAMPLE}/`]({_repo}/tree/main/examples/{EXAMPLE}) — in particular
-    [`model.py`]({_repo}/blob/main/examples/{EXAMPLE}/model.py) for the flowsheet
-    and [`notebook.py`]({_repo}/blob/main/examples/{EXAMPLE}/notebook.py) for the
-    walkthrough that builds and solves it.
+    These are **precomputed** results. Each month is a big mixed-integer
+    problem (about 27,000 on/off decisions) solved with Gurobi, which doesn't
+    run in a browser. The model and a notebook that solves it live in
+    [the repo]({_repo}).
     """
         ),
         kind="info",
@@ -94,18 +121,12 @@ def _(EXAMPLE, mo):
 
 @app.cell
 def _(DATA, duckdb, mo):
-    # DuckDB reads the Parquet straight from the URL. Under WebAssembly marimo
-    # intercepts the remote scan, fetches the bytes and hands them back through a
-    # replacement scan -- DuckDB-WASM has no httpfs of its own -- so this query
-    # runs unchanged here and in the browser.
     try:
         summary = duckdb.sql(
-            f"SELECT * FROM read_parquet('{DATA}/summary.parquet') ORDER BY sweep_id"
+            f"SELECT * FROM read_parquet('{DATA}/summary.parquet') ORDER BY capacity_fraction"
         ).df()
         provenance = (
-            duckdb.sql(
-                f"SELECT key, value FROM read_parquet('{DATA}/provenance.parquet')"
-            )
+            duckdb.sql(f"SELECT key, value FROM read_parquet('{DATA}/provenance.parquet')")
             .df()
             .set_index("key")["value"]
         )
@@ -116,343 +137,307 @@ def _(DATA, duckdb, mo):
     mo.stop(
         load_error is not None,
         mo.callout(
-            mo.md(
-                f"""
-    **Could not load the sweep data.** Expected it under `{DATA}`.
-
-    ```
-    {load_error}
-    ```
-    """
-            ),
+            mo.md(f"**Couldn't load the results** from `{DATA}`.\n\n```\n{load_error}\n```"),
             kind="danger",
         ),
     )
+
+    summary["usd_per_af"] = summary["operating_cost"] / summary["delivered_af"]
+    summary["short_label"] = summary["capacity_fraction"].map(lambda f: f"{f:.0%}")
     return provenance, summary
 
 
 @app.cell
-def _(mo):
-    mo.md(
-        r"""
-    ## Running out of slack
+def _(summary):
+    # With the plant off from 4 to 9pm, all it buys in that window is the intake
+    # pump's standby draw. The last target where on-peak energy is still at that
+    # floor is the last one where the plant skips the peak entirely.
+    _floor = summary["peak_window_kwh"].min()
+    _skips = summary[summary["peak_window_kwh"] <= _floor * 1.01]
+    last_skip = summary.loc[_skips.index[-1]]
+    cheapest = summary.loc[summary["usd_per_af"].idxmin()]
+    priciest = summary.loc[summary["usd_per_af"].idxmax()]
+    return cheapest, last_skip, priciest
 
-    The obligation is swept from half the plant's capacity up to almost all of
-    it. Capacity here is every skid at rated feed and top recovery for every step
-    of the month, never stopping — so the ratio on the x-axis is really *how much
-    room the schedule has*.
-    """
-    )
+
+@app.cell
+def _(mo):
+    mo.md(r"""
+    ## The short answer
+    """)
     return
 
 
 @app.cell
-def _(plt, summary):
-    def _plot_sweep(frame):
-        frame = frame.sort_values("demand_af")
-        fig, axes = plt.subplots(
-            3, 1, figsize=(9, 8), sharex=True, layout="constrained"
-        )
+def _(
+    BLUE,
+    INK,
+    MUTED,
+    PEAK,
+    SURFACE,
+    cheapest,
+    last_skip,
+    plt,
+    style,
+    summary,
+):
+    def _plot(frame):
+        fig, axes = plt.subplots(2, 1, figsize=(8, 5.6), sharex=True, layout="constrained",
+                                 gridspec_kw={"height_ratios": [3, 2]})
+        fig.patch.set_facecolor(SURFACE)
         x = frame["capacity_fraction"]
+        # Shade the targets where the plant can no longer skip the peak.
+        nxt = frame[frame["capacity_fraction"] > last_skip["capacity_fraction"]]
+        split = (last_skip["capacity_fraction"] + nxt["capacity_fraction"].iloc[0]) / 2
 
-        ax = axes[0]
-        ax.plot(x, frame["operating_cost"], marker="o", markersize=5,
-                linewidth=2, color="#2f6f8f")
-        ax.set_ylabel("Operating cost ($)")
-        ax.set_title("What the month costs, and what it costs to get there")
-        ax.yaxis.set_major_formatter(lambda v, _: f"{v:,.0f}")
+        for ax in axes:
+            ax.axvspan(split, x.max() + 0.03, color=PEAK, lw=0, zorder=0)
 
-        ax = axes[1]
-        ax.plot(x, frame["restarts"], marker="o", markersize=5,
-                linewidth=2, color="#b3543f")
-        ax.set_ylabel("RO startups")
+        ax = style(axes[0], "$ per acre-foot")
+        ax.plot(x, frame["usd_per_af"], color=BLUE, lw=2, marker="o", ms=6,
+                mec=SURFACE, mew=2)
+        ax.annotate("cheapest variable cost", (cheapest["capacity_fraction"], cheapest["usd_per_af"]),
+                    xytext=(0, -16), textcoords="offset points", ha="center",
+                    color=INK, fontsize=9)
+        ax.annotate("off from 4–9pm\nevery day", (split, 1), xycoords=("data", "axes fraction"),
+                    xytext=(-6, -6), textcoords="offset points",
+                    ha="right", va="top", color=MUTED, fontsize=8)
+        ax.annotate("has to run\nduring the peak", (split, 1), xycoords=("data", "axes fraction"),
+                    xytext=(6, -6), textcoords="offset points", ha="left", va="top",
+                    color=MUTED, fontsize=8)
+        ax.set_ylim(0, frame["usd_per_af"].max() * 1.15)
+        ax.yaxis.set_major_formatter(lambda v, _: f"${v:,.0f}")
+        ax.set_title("What each acre-foot costs", loc="left", color=INK, fontsize=10)
 
-        ax = axes[2]
-        ax.plot(x, frame["offspec_af"], marker="o", markersize=5,
-                linewidth=2, color="#8a6fb0")
-        ax.set_ylabel("Off-spec permeate (AF)")
-        ax.set_xlabel(
-            "Monthly obligation, as a fraction of what the plant could make flat out"
-        )
-        ax.xaxis.set_major_formatter(lambda v, _: f"{v:.0%}")
+        ax = style(axes[1], "MWh")
+        ax.plot(x, frame["peak_window_kwh"] / 1000, color=BLUE, lw=2, marker="o", ms=6,
+                mec=SURFACE, mew=2)
+        ax.set_ylim(0, frame["peak_window_kwh"].max() / 1000 * 1.15)
+        ax.set_title("Energy bought from 4 to 9pm, over the month", loc="left",
+                     color=INK, fontsize=10)
 
-        for a in axes:
-            a.grid(axis="y", alpha=0.25, zorder=0)
-            a.set_ylim(bottom=0)
-            for side in ("top", "right"):
-                a.spines[side].set_visible(False)
+        axes[1].set_xlabel("Monthly target (% of what the plant could make running flat out)",
+                           color=MUTED, fontsize=9)
+        axes[1].xaxis.set_major_formatter(lambda v, _: f"{v:.0%}")
+        axes[1].set_xlim(x.min() - 0.03, x.max() + 0.03)
         return fig
 
-    _plot_sweep(summary)
+    _plot(summary)
     return
 
 
 @app.cell
-def _(mo, summary):
-    _sorted = summary.sort_values("capacity_fraction")
-    _low, _high = _sorted.iloc[0], _sorted.iloc[-1]
-    _cost_ratio = _high["operating_cost"] / _low["operating_cost"]
-    _demand_ratio = _high["demand_af"] / _low["demand_af"]
+def _(cheapest, last_skip, mo, priciest):
+    mo.md(f"""
+    Up to **{last_skip.capacity_fraction:.0%}** of capacity, the plant can make
+    all its water outside the peak. It shuts down at 4pm every day and comes
+    back after 9. Each acre-foot actually gets a bit cheaper up to that point,
+    because the intake pump runs either way and its cost is spread over more
+    water.
 
-    mo.md(
-        f"""
-    Between **{_low['capacity_fraction']:.0%}** and
-    **{_high['capacity_fraction']:.0%}** of capacity the plant is asked for
-    {_demand_ratio:.1f}× the water and the bill goes up {_cost_ratio:.1f}×. The
-    interesting part is the middle two panels: the binding constraint is not the
-    tariff, it is **headroom**. Low down, the optimizer can afford to shut the RO
-    system through the whole peak window and make the water back later. As the
-    obligation climbs there is less and less room to move water around, and each
-    restart it does buy costs a 45-minute recuperation window in which all three
-    trains make permeate the plant cannot sell.
-    """
-    )
+    Above that, there aren't enough off-peak hours left, so the plant has to
+    run during the peak. At {priciest.capacity_fraction:.0%}, an acre-foot costs
+    **\\${priciest.usd_per_af:,.0f}**, compared with \\${cheapest.usd_per_af:,.0f}
+    at the cheapest point.
+    """)
     return
 
 
 @app.cell
-def _(mo):
-    mo.md(
-        r"""
-    ## One month at a time
-
-    Pick an obligation to see three days out of the middle of its schedule.
-    Shaded bands are the on-peak tariff hours.
-    """
+def _(cheapest, mo, summary):
+    month = mo.ui.radio(
+        options=dict(zip(summary["short_label"], summary["sweep_id"])),
+        value=cheapest["short_label"],
+        label="Monthly target (% of capacity)",
+        inline=True,
     )
-    return
+    mo.vstack([mo.md("## Look at one month"), month])
+    return (month,)
 
 
 @app.cell
-def _(mo, summary):
-    _labels = summary.sort_values("capacity_fraction")
-    case = mo.ui.dropdown(
-        options=dict(zip(_labels["label"], _labels["sweep_id"])),
-        value=_labels["label"].iloc[len(_labels) // 2],
-        label="Monthly obligation",
-    )
-    case
-    return (case,)
+def _(DATA, duckdb, month, summary):
+    picked = summary.set_index("sweep_id").loc[month.value]
 
-
-@app.cell
-def _(DATA, case, duckdb, mo):
-    mo.stop(case.value is None, mo.md("*Pick an obligation above.*"))
-    # Every point lives in one Parquet file per view, so selecting one is a
-    # filter rather than another fetch -- and `timestamp` arrives as a timestamp,
-    # with no parse_dates to get wrong.
-    window = duckdb.sql(
-        f"""
-        SELECT * EXCLUDE (sweep_id)
-        FROM read_parquet('{DATA}/series.parquet')
-        WHERE sweep_id = '{case.value}'
-        ORDER BY timestamp
-        """
-    ).df().set_index("timestamp")
-    profile = duckdb.sql(
-        f"""
-        SELECT * EXCLUDE (sweep_id)
-        FROM read_parquet('{DATA}/profile.parquet')
-        WHERE sweep_id = '{case.value}'
-        ORDER BY time_of_day
-        """
-    ).df().set_index("time_of_day")
-    return profile, window
-
-
-@app.cell
-def _(case, mdates, plt, summary, window):
-    def _plot_window(frame, label, meta):
-        fig, axes = plt.subplots(
-            3, 1, figsize=(9, 7.8), sharex=True, layout="constrained"
-        )
-        t = frame.index
-        peak = frame["energy_price"] > frame["energy_price"].min()
-
-        def shade(ax):
-            ax.fill_between(
-                t, 0, 1, where=peak, transform=ax.get_xaxis_transform(),
-                color="#d9c9a3", alpha=0.35, linewidth=0, zorder=0, step="post",
+    def _view(name, order):
+        return (
+            duckdb.sql(
+                f"""
+                SELECT * EXCLUDE (sweep_id)
+                FROM read_parquet('{DATA}/{name}.parquet')
+                WHERE sweep_id = '{month.value}'
+                ORDER BY {order}
+                """
             )
-
-        ax = axes[0]
-        shade(ax)
-        ax.step(t, frame["product_m3_per_hr"], where="post",
-                color="#2f6f8f", linewidth=1.8, label="product water")
-        if frame["offspec_permeate_m3_per_hr"].max() > 0:
-            ax.fill_between(t, frame["offspec_permeate_m3_per_hr"], step="post",
-                            color="#b3543f", alpha=0.75, linewidth=0,
-                            label="off-spec to outfall")
-        ax.set_ylabel("Flow (m³/hr)")
-        ax.set_title(
-            f"{label} — ${meta['operating_cost']:,.0f} and "
-            f"{int(meta['restarts'])} RO startups over the month"
+            .df()
+            .set_index(order)
         )
-        ax.legend(frameon=False, ncols=2, fontsize=9)
 
-        ax = axes[1]
-        shade(ax)
-        ax.step(t, frame["trains_online"], where="post",
-                color="#3f6f4f", linewidth=1.8, label="trains online")
-        ax.step(t, frame["post_treatment_status"], where="post",
-                color="#8a6fb0", linewidth=1.4, linestyle=":",
-                label="post-treatment on")
-        ax.set_ylabel("Trains / status")
+    window = _view("series", "timestamp")
+    profile = _view("profile", "time_of_day")
+    return picked, profile, window
+
+
+@app.cell
+def _(mo, picked):
+    mo.hstack(
+        [
+            mo.stat(f"${picked.operating_cost / 1000:,.0f}k", label="Power bill for the month"),
+            mo.stat(f"${picked.usd_per_af:,.0f}", label="Per acre-foot"),
+            mo.stat(f"{picked.restarts:.0f}", label="Restarts"),
+            mo.stat(f"{picked.offspec_af:.1f} AF", label="Dumped while restarting"),
+        ],
+        justify="start",
+        gap=2,
+    )
+    return
+
+
+@app.cell
+def _(BLUE, INK, MUTED, ORANGE, PEAK, SURFACE, mdates, pd, plt, style, window):
+    def _plot_window(frame):
+        fig, axes = plt.subplots(2, 1, figsize=(8, 5.2), sharex=True, layout="constrained")
+        fig.patch.set_facecolor(SURFACE)
+        # Each row covers the 15 minutes that follow it. Repeat the last row one
+        # step later so the step lines draw that final interval too.
+        step = frame.index[1] - frame.index[0]
+        frame = pd.concat([frame, frame.iloc[[-1]].set_axis([frame.index[-1] + step])])
+        t = frame.index
+
+        peak = frame["energy_price"] > frame["energy_price"].min()
+        starts = t[peak & ~peak.shift(fill_value=False)]
+        ends = t[~peak & peak.shift(fill_value=False)]
+        for ax in axes:
+            for a, b in zip(starts, ends):
+                ax.axvspan(a, b, color=PEAK, lw=0, zorder=0)
+        axes[0].annotate("4–9pm peak", (starts[0], 1), xytext=(4, -4),
+                         textcoords="offset points", xycoords=("data", "axes fraction"),
+                         color=MUTED, fontsize=8, va="top")
+
+        # A train is "restarting" when it's on but post-treatment isn't yet, so
+        # its water goes to the outfall instead of the customer.
+        trains = frame["trains_online"]
+        dumping = frame["offspec_permeate_m3_per_hr"] > 0
+        ax = style(axes[0], "")
+        ax.fill_between(t, trains, step="post", color=BLUE, alpha=0.25, lw=0)
+        ax.step(t, trains, where="post", color=BLUE, lw=2, label="making water")
+        ax.fill_between(t, trains, where=dumping, step="post", color=ORANGE, lw=0,
+                        label="restarting (water dumped)")
         ax.set_yticks([0, 1, 2, 3])
-        ax.legend(frameon=False, ncols=2, fontsize=9)
+        ax.set_ylim(0, 3.6)
+        ax.set_title("Trains running", loc="left", color=INK, fontsize=10)
+        ax.legend(frameon=False, fontsize=8, labelcolor=MUTED, ncols=2, loc="lower right",
+                  bbox_to_anchor=(1, 1), borderaxespad=0)
 
-        ax = axes[2]
-        shade(ax)
-        ax.fill_between(t, frame["grid_kw"], step="post",
-                        color="#7fa8bf", alpha=0.4, linewidth=0)
-        ax.step(t, frame["grid_kw"], where="post", color="#2f6f8f", linewidth=1.6)
-        ax.set_ylabel("Plant power (kW)")
-        ax.set_xlabel("Shaded bands are the on-peak tariff window")
-        ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %-d\n%H:%M"))
-        ax.xaxis.set_major_locator(mdates.HourLocator(interval=12))
+        ax = style(axes[1], "MW")
+        ax.fill_between(t, frame["grid_kw"] / 1000, step="post", color=INK, alpha=0.12, lw=0)
+        ax.step(t, frame["grid_kw"] / 1000, where="post", color=INK, lw=1.6)
+        ax.set_ylim(0, None)
+        ax.set_title("Power from the grid", loc="left", color=INK, fontsize=10)
 
-        for a in axes:
-            a.grid(axis="y", alpha=0.2, zorder=0)
-            a.set_ylim(bottom=0)
-            for side in ("top", "right"):
-                a.spines[side].set_visible(False)
+        axes[-1].set_xticks(pd.date_range(t[0].normalize(), t[-1], freq="12h"))
+        axes[-1].xaxis.set_major_formatter(mdates.DateFormatter("%b %-d\n%-I%p"))
+        axes[-1].set_xlim(t[0], t[-1])
         return fig
 
-    _plot_window(
-        window, case.selected_key, summary.set_index("sweep_id").loc[case.value]
-    )
+    _plot_window(window)
     return
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""
-    ### The average day
-
-    The same month, folded onto a single 24 hours. This is where the tariff
-    response shows up as a shape rather than as a decision: how much of the
-    plant is running at each time of day, averaged over the whole month.
-    """
-    )
+    mo.md(r"""
+    That's three days from the middle of the month. Here's the whole month
+    averaged into one day:
+    """)
     return
 
 
 @app.cell
-def _(case, plt, profile):
-    def _plot_profile(frame, label):
-        fig, ax = plt.subplots(figsize=(9, 3.8), layout="constrained")
-        x = range(len(frame))
-        ax.fill_between(x, frame["trains_online"], step="mid",
-                        color="#7fa8bf", alpha=0.45, linewidth=0)
-        ax.step(x, frame["trains_online"], where="mid",
-                color="#2f6f8f", linewidth=2)
-        ax.set_ylabel("Trains online (month average)")
-        ax.set_ylim(0, 3.05)
-        ax.set_title(f"{label} — average day")
-
-        twin = ax.twinx()
-        twin.step(x, frame["energy_price"], where="mid",
-                  color="#b3543f", linewidth=1.4, linestyle="--")
-        twin.set_ylabel("Energy price ($/kWh)", color="#b3543f")
-        twin.tick_params(axis="y", colors="#b3543f")
-        twin.spines["top"].set_visible(False)
-
-        ticks = [i for i, name in enumerate(frame.index) if name.endswith(":00")][::3]
-        ax.set_xticks(ticks)
-        ax.set_xticklabels([frame.index[i] for i in ticks])
-        ax.set_xlabel("Time of day")
-        ax.grid(axis="y", alpha=0.2, zorder=0)
-        for side in ("top", "right"):
-            ax.spines[side].set_visible(False)
+def _(BLUE, INK, MUTED, PEAK, SURFACE, np, plt, profile, style):
+    def _plot_profile(frame):
+        fig, ax = plt.subplots(figsize=(8, 2.8), layout="constrained")
+        fig.patch.set_facecolor(SURFACE)
+        style(ax, "")
+        hours = np.arange(len(frame) + 1) * 24 / len(frame)
+        trains = np.append(frame["trains_online"].to_numpy(), frame["trains_online"].iloc[-1])
+        peak = np.append(
+            (frame["energy_price"] > frame["energy_price"].min()).to_numpy(), False
+        )
+        ax.axvspan(hours[peak.argmax()], hours[peak.argmax() + peak.sum()], color=PEAK,
+                   lw=0, zorder=0)
+        ax.annotate("4–9pm peak", (hours[peak.argmax()], 1), xytext=(4, -4),
+                    textcoords="offset points", xycoords=("data", "axes fraction"),
+                    color=MUTED, fontsize=8, va="top")
+        ax.fill_between(hours, trains, step="post", color=BLUE, alpha=0.25, lw=0)
+        ax.step(hours, trains, where="post", color=BLUE, lw=2)
+        ax.set_xticks(range(0, 25, 3))
+        ax.set_xticklabels(["12am", "3am", "6am", "9am", "12pm", "3pm", "6pm", "9pm", "12am"])
+        ax.set_xlim(0, 24)
+        ax.set_yticks([0, 1, 2, 3])
+        ax.set_ylim(0, 3.6)
+        ax.set_title("Trains running on an average day", loc="left", color=INK, fontsize=10)
         return fig
 
-    _plot_profile(profile, case.selected_key)
+    _plot_profile(profile)
     return
 
 
 @app.cell
-def _(mo, summary):
-    _capped = summary[summary["termination"].astype(str).str.contains(
-        "maxTimeLimit|aborted", case=False, na=False
-    )]
-    _note = ""
-    if len(_capped):
-        _labels = ", ".join(sorted(_capped["label"]))
-        _worst = _capped["mip_gap"].max()
-        _note = f"""
-
-    {len(_capped)} of these hit the sweep's per-point time limit rather than
-    proving optimality — {_labels}. Their schedules are feasible and their bills
-    are real, but each is an upper bound: the true optimum is up to
-    {_worst:.1%} cheaper. That is the difficulty cliff the middle panel above is
-    really showing. Near the plant's ceiling there is so little room left that
-    the search itself becomes the expensive part."""
-
-    mo.md(f"## Every month solved{_note}")
-    return
-
-
-@app.cell
-def _(mo, summary):
-    _table = summary.sort_values("capacity_fraction")[
-        [
-            "demand_af",
-            "capacity_fraction",
-            "delivered_af",
-            "operating_cost",
-            "restarts",
-            "offspec_af",
-            "peak_kw",
-            "termination",
-            "mip_gap",
-        ]
+def _(mo, provenance, summary):
+    _table = summary[
+        ["capacity_fraction", "demand_af", "operating_cost", "usd_per_af", "restarts",
+         "offspec_af", "peak_window_kwh", "termination", "mip_gap"]
     ].rename(
         columns={
-            "demand_af": "Obligation (AF)",
-            "capacity_fraction": "Of capacity",
-            "delivered_af": "Delivered (AF)",
-            "operating_cost": "Operating cost ($)",
-            "restarts": "RO startups",
-            "offspec_af": "Off-spec (AF)",
-            "peak_kw": "Peak draw (kW)",
-            "termination": "Termination",
+            "capacity_fraction": "Target (% of capacity)",
+            "demand_af": "Target (AF)",
+            "operating_cost": "Power bill ($)",
+            "usd_per_af": "$ per AF",
+            "restarts": "Restarts",
+            "offspec_af": "Dumped (AF)",
+            "peak_window_kwh": "Bought 4–9pm (kWh)",
+            "termination": "Solver status",
             "mip_gap": "Gap",
         }
     )
-    _table["Of capacity"] = (_table["Of capacity"] * 100).round(0).astype(int).astype(str) + "%"
-    mo.ui.table(_table.round(2), selection=None, page_size=12)
-    return
+    _table["Target (% of capacity)"] = (_table["Target (% of capacity)"] * 100).round().astype(int)
 
+    _capped = summary[summary["termination"].astype(str).str.contains("maxTimeLimit", na=False)]
+    _note = ""
+    if len(_capped):
+        _note = (
+            f"\n\n{', '.join(_capped['short_label'])} hit the time limit before the solver "
+            f"could prove it was optimal. The schedule is still valid, but the best one "
+            f"could be up to {_capped['mip_gap'].max():.1%} cheaper."
+        )
 
-@app.cell
-def _(mo, provenance):
-    _keys = [
-        ("generated_utc", "Solved"),
-        ("flexpse_version", "flex-pse"),
-        ("flexpse_commit", "flex-pse commit"),
-        ("solver", "Solver"),
-        ("n_points", "Sweep points"),
-        ("total_wall_seconds", "Total solve time (s)"),
-    ]
     _rows = "\n".join(
         f"| {label} | `{provenance.get(key, '—')}` |"
-        for key, label in _keys
+        for key, label in [
+            ("generated_utc", "Solved"),
+            ("flexpse_commit", "flex-pse commit"),
+            ("solver", "Solver"),
+            ("total_wall_seconds", "Total solve time (s)"),
+        ]
         if key in provenance.index
     )
     mo.accordion(
         {
-            "How these numbers were made": mo.md(
+            "Every month": mo.vstack([
+                mo.ui.table(_table.round(3), selection=None, page_size=12),
+                mo.md(_note),
+            ]),
+            "How these were made": mo.md(
                 f"""
-| | |
-| --- | --- |
-{_rows}
+    | | |
+    | --- | --- |
+    {_rows}
 
-Regenerate with `python tools/sweep.py examples/desalination_scheduling` in an
-environment with a Gurobi licence — the exact month is a non-convex MIQCP and
-HiGHS cannot take the problem.
-"""
-            )
+    To regenerate: `python tools/sweep.py examples/desalination_scheduling`. You'll
+    need a Gurobi license, since the full month is a non-convex MIQCP.
+    """
+            ),
         }
     )
     return
