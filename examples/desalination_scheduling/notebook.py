@@ -22,9 +22,11 @@ def _():
     if str(here) not in sys.path:
         sys.path.insert(0, str(here))
 
+    import diagram
     import model
+    from flex_pse_examples.diagrams import render as render_diagram
 
-    return mo, model, pyo, pyunits
+    return diagram, mo, model, pyo, pyunits, render_diagram
 
 
 @app.cell
@@ -35,14 +37,6 @@ def _(mo, model):
     A seawater plant with three RO trains has to deliver a set volume of water
     each month. When it makes that water is up to the plant, and there's no
     storage.
-
-    ```
-                       ┌─► pretreatment[0] ─► RO[0] ─┬─► brine ─► ocean
-    seawater ─► intake ─┼─► pretreatment[1] ─► RO[1] ─┤        (permeate)
-                 pump   └─► pretreatment[2] ─► RO[2] ─┘            │
-                                                                   ▼
-      product water ◄─ product pump ◄─ post-treatment ◄─ permeate header
-    ```
 
     A few things shape the schedule:
 
@@ -60,6 +54,15 @@ def _(mo, model):
     The flowsheet is in [`model.py`](model.py). Only the tariff comes from
     `config.json`.
     """)
+    return
+
+
+@app.cell
+def _(diagram, mo, render_diagram):
+    # The flowsheet, assembled from the flex_pse_examples.diagrams icon library.
+    # Edit NODES/EDGES in diagram.py, then run tools/render_diagrams.py so the
+    # WebAssembly page's copy (public/<name>/flowsheet.svg) stays in step.
+    mo.Html(render_diagram(diagram.NODES, diagram.EDGES))
     return
 
 

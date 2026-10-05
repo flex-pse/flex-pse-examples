@@ -22,9 +22,11 @@ def _():
     if str(here) not in sys.path:
         sys.path.insert(0, str(here))
 
+    import diagram
     import model
+    from flex_pse_examples.diagrams import render as render_diagram
 
-    return mo, model, plt
+    return diagram, mo, model, plt, render_diagram
 
 
 @app.cell
@@ -33,11 +35,6 @@ def _(mo):
     # Pump scheduling
 
     **Is it better to buy a bigger battery, or to let the pumps run flexibly?**
-
-    ```
-    feed pump ──► tank ──► product pump ──► demand
-                                    battery ──┘ (on the electric side)
-    ```
 
     Two ways to run the feed pump:
 
@@ -52,6 +49,15 @@ def _(mo):
 
     Inputs are in `config.json` and the model is in `model.py`.
     """)
+    return
+
+
+@app.cell
+def _(diagram, mo, render_diagram):
+    # The flowsheet, assembled from the flex_pse_examples.diagrams icon library.
+    # Edit NODES/EDGES in diagram.py, then run tools/render_diagrams.py so the
+    # WebAssembly page's copy (public/<name>/flowsheet.svg) stays in step.
+    mo.Html(render_diagram(diagram.NODES, diagram.EDGES))
     return
 
 

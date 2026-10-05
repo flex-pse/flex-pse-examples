@@ -72,33 +72,10 @@ def _(mo):
 
 
 @app.cell
-def _(BLUE, INK, MUTED, SURFACE, np, plt):
-    def _diagram():
-        fig, ax = plt.subplots(figsize=(8, 1.6))
-        fig.patch.set_facecolor(SURFACE)
-        ax.set_axis_off()
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        unit = {"boxstyle": "round,pad=0.6", "fc": "#eef4fc", "ec": BLUE, "lw": 1}
-        arrow = {"arrowstyle": "-|>", "color": MUTED, "lw": 1.2, "shrinkA": 9, "shrinkB": 9}
-
-        steps = ["seawater", "intake", "3 RO trains", "post-treatment", "product water"]
-        xs = np.linspace(0.07, 0.93, len(steps))
-        nodes = [
-            ax.text(x, 0.75, s, ha="center", va="center", fontsize=9, color=INK,
-                    bbox=unit if 0 < i < len(steps) - 1 else None)
-            for i, (x, s) in enumerate(zip(xs, steps))
-        ]
-        brine = ax.text(xs[2], 0.15, "brine to the ocean", ha="center", va="center",
-                        fontsize=9, color=INK)
-        for a, b in zip(nodes, nodes[1:]):
-            ax.annotate("", xy=(0, 0.5), xycoords=b, xytext=(1, 0.5), textcoords=a,
-                        arrowprops=arrow)
-        ax.annotate("", xy=(0.5, 1), xycoords=brine, xytext=(0.5, 0), textcoords=nodes[2],
-                    arrowprops=arrow)
-        return fig
-
-    _diagram()
+def _(DATA, mo):
+    # Rendered offline from diagram.py by tools/render_diagrams.py and committed
+    # beside the sweep data -- the renderer is not something Pyodide installs.
+    mo.image(src=f"{DATA}/flowsheet.svg", alt="Process flow diagram of the desalination plant")
     return
 
 

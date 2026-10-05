@@ -1,0 +1,542 @@
+{
+  "style": "color",
+  "viewBox": [
+    0,
+    0,
+    64,
+    64
+  ],
+  "strokeWidth": 2.25,
+  "portOrder": [
+    "n",
+    "e",
+    "s",
+    "w"
+  ],
+  "flows": {
+    "fluid": {
+      "color": "#2f8fd0",
+      "dasharray": ""
+    },
+    "gas": {
+      "color": "#5a9a3c",
+      "dasharray": "7 3"
+    },
+    "electricity": {
+      "color": "#d9a400",
+      "dasharray": "7 3 1.5 3"
+    },
+    "heat": {
+      "color": "#d0453a",
+      "dasharray": "0.1 4"
+    }
+  },
+  "icons": [
+    {
+      "id": "tank",
+      "name": "Tank",
+      "ports": {
+        "n": [
+          32,
+          8
+        ],
+        "e": [
+          50,
+          32
+        ],
+        "s": [
+          32,
+          54
+        ],
+        "w": [
+          14,
+          32
+        ]
+      },
+      "svg": "<svg data-icon=\"color/tank\" data-name=\"Tank\" data-ports=\"n:32,8 e:50,32 s:32,54 w:14,32\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M14 22C14 12 22 8 32 8S50 12 50 22V54H14Z\" fill=\"#c8d0da\"></path><path d=\"M15.1 34H48.9V52.9H15.1Z\" fill=\"#bfe6f7\" stroke=\"none\"></path><path d=\"M14 34H50\"></path><path d=\"M14 22C14 12 22 8 32 8S50 12 50 22V54H14Z\"></path></svg>"
+    },
+    {
+      "id": "pump",
+      "name": "Pump",
+      "ports": {
+        "n": [
+          36,
+          16
+        ],
+        "e": [
+          50,
+          21
+        ],
+        "s": [
+          32,
+          54
+        ],
+        "w": [
+          14,
+          32
+        ]
+      },
+      "svg": "<svg data-icon=\"color/pump\" data-name=\"Pump\" data-ports=\"n:36,16 e:50,21 s:32,54 w:14,32\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"13\" y=\"42\" width=\"38\" height=\"12\" rx=\"3\" fill=\"#555b63\"></rect><path d=\"M28 16H48A2 2 0 0 1 50 18V24A2 2 0 0 1 48 26H41.4A14 14 0 1 1 28 16Z\" fill=\"#9aa5b1\"></path><circle cx=\"28\" cy=\"30\" r=\"6.5\" fill=\"#c8d0da\" stroke=\"#555b63\" stroke-width=\"3.5\"></circle></svg>"
+    },
+    {
+      "id": "compressor",
+      "name": "Compressor",
+      "ports": {
+        "n": [
+          26,
+          18
+        ],
+        "e": [
+          52,
+          32
+        ],
+        "s": [
+          26,
+          46
+        ],
+        "w": [
+          12,
+          32
+        ]
+      },
+      "svg": "<svg data-icon=\"color/compressor\" data-name=\"Compressor\" data-ports=\"n:26,18 e:52,32 s:26,46 w:12,32\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><defs><linearGradient id=\"pc-comp\" x1=\"0\" x2=\"1\" y1=\"0\" y2=\"0\"><stop offset=\"0\" stop-color=\"#f6ecc9\"></stop><stop offset=\"1\" stop-color=\"#e9a85a\"></stop></linearGradient></defs><rect x=\"40\" y=\"28\" width=\"12\" height=\"8\" fill=\"#e8ecec\"></rect><path d=\"M12 14L40 22V42L12 50Z\" fill=\"url(#pc-comp)\"></path></svg>"
+    },
+    {
+      "id": "turbine",
+      "name": "Turbine",
+      "ports": {
+        "n": [
+          36,
+          14.5
+        ],
+        "e": [
+          52,
+          32
+        ],
+        "s": [
+          36,
+          49.5
+        ],
+        "w": [
+          12,
+          32
+        ]
+      },
+      "svg": "<svg data-icon=\"color/turbine\" data-name=\"Turbine\" data-ports=\"n:36,14.5 e:52,32 s:36,49.5 w:12,32\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><defs><linearGradient id=\"pc-turb\" x1=\"0\" x2=\"1\" y1=\"0\" y2=\"0\"><stop offset=\"0\" stop-color=\"#3fa6e0\"></stop><stop offset=\"1\" stop-color=\"#cfeaf7\"></stop></linearGradient></defs><rect x=\"12\" y=\"28\" width=\"12\" height=\"8\" fill=\"#e8ecec\"></rect><path d=\"M24 22L52 12V52L24 42Z\" fill=\"url(#pc-turb)\"></path></svg>"
+    },
+    {
+      "id": "generator",
+      "name": "Generator",
+      "ports": {
+        "n": [
+          30,
+          16
+        ],
+        "e": [
+          52,
+          32
+        ],
+        "s": [
+          30,
+          48
+        ],
+        "w": [
+          6,
+          32
+        ]
+      },
+      "svg": "<svg data-icon=\"color/generator\" data-name=\"Generator\" data-ports=\"n:30,16 e:52,32 s:30,48 w:6,32\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"6\" y=\"28.5\" width=\"8\" height=\"7\" fill=\"#e8ecec\"></rect><rect x=\"44\" y=\"22\" width=\"8\" height=\"20\" rx=\"1.5\" fill=\"#555b63\"></rect><rect x=\"14\" y=\"16\" width=\"32\" height=\"32\" rx=\"4\" fill=\"#9aa5b1\"></rect><path d=\"M33 20L23 34H30L27 44L37 29H30Z\" fill=\"#f0cf8a\"></path></svg>"
+    },
+    {
+      "id": "boiler",
+      "name": "Boiler",
+      "ports": {
+        "n": [
+          32,
+          8
+        ],
+        "e": [
+          50,
+          30
+        ],
+        "s": [
+          32,
+          56
+        ],
+        "w": [
+          14,
+          30
+        ]
+      },
+      "svg": "<svg data-icon=\"color/boiler\" data-name=\"Boiler\" data-ports=\"n:32,8 e:50,30 s:32,56 w:14,30\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"14\" y=\"8\" width=\"36\" height=\"48\" rx=\"7\" fill=\"#c8d0da\"></rect><path d=\"M15.1 22H48.9V40H15.1Z\" fill=\"#bfe6f7\" stroke=\"none\"></path><path d=\"M14 22H50\"></path><path d=\"M14 40H50V49A7 7 0 0 1 43 56H21A7 7 0 0 1 14 49Z\" fill=\"#555b63\"></path><path d=\"M27 53C25 48 30 46 32 41C35 46 38 48 37 53Z\" fill=\"#e9a85a\"></path><rect x=\"14\" y=\"8\" width=\"36\" height=\"48\" rx=\"7\"></rect></svg>"
+    },
+    {
+      "id": "electrolyzer",
+      "name": "Electrolyzer",
+      "ports": {
+        "n": [
+          32,
+          18
+        ],
+        "e": [
+          54,
+          37
+        ],
+        "s": [
+          32,
+          56
+        ],
+        "w": [
+          10,
+          37
+        ]
+      },
+      "svg": "<svg data-icon=\"color/electrolyzer\" data-name=\"Electrolyzer\" data-ports=\"n:32,18 e:54,37 s:32,56 w:10,37\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M22 12V7H29.5M34.5 7H42V12\" stroke-width=\"2.5\"></path><path d=\"M29.5 3V11M34.5 3V11\" stroke-width=\"2.5\"></path><rect x=\"10\" y=\"18\" width=\"44\" height=\"38\" rx=\"5\" fill=\"#bfe6f7\"></rect><rect x=\"19\" y=\"12\" width=\"6\" height=\"36\" rx=\"1\" fill=\"#9aa5b1\"></rect><rect x=\"39\" y=\"12\" width=\"6\" height=\"36\" rx=\"1\" fill=\"#f0cf8a\"></rect><g stroke-width=\"1.25\"><circle cx=\"29\" cy=\"30\" r=\"2.2\" fill=\"#b9b8f0\"></circle><circle cx=\"29\" cy=\"36\" r=\"2.2\" fill=\"#b9b8f0\"></circle><circle cx=\"29\" cy=\"42\" r=\"2.2\" fill=\"#b9b8f0\"></circle><circle cx=\"35\" cy=\"27\" r=\"2.2\" fill=\"#f5c1c8\"></circle><circle cx=\"35\" cy=\"33\" r=\"2.2\" fill=\"#f5c1c8\"></circle><circle cx=\"35\" cy=\"39\" r=\"2.2\" fill=\"#f5c1c8\"></circle></g></svg>"
+    },
+    {
+      "id": "membrane",
+      "name": "Membrane unit",
+      "ports": {
+        "n": [
+          32,
+          18
+        ],
+        "e": [
+          56,
+          32
+        ],
+        "s": [
+          32,
+          46
+        ],
+        "w": [
+          8,
+          32
+        ]
+      },
+      "svg": "<svg data-icon=\"color/membrane\" data-name=\"Membrane unit\" data-ports=\"n:32,18 e:56,32 s:32,46 w:8,32\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><defs><linearGradient id=\"pc-memA\" x1=\"0\" x2=\"1\" y1=\"0\" y2=\"0\"><stop offset=\"0\" stop-color=\"#8fd3f5\"></stop><stop offset=\"1\" stop-color=\"#6f8fc9\"></stop></linearGradient><linearGradient id=\"pc-memB\" x1=\"0\" x2=\"1\" y1=\"0\" y2=\"0\"><stop offset=\"0\" stop-color=\"#cfeaf7\"></stop><stop offset=\"1\" stop-color=\"#a9cfdc\"></stop></linearGradient></defs><path d=\"M8 18H56V32H8Z\" fill=\"url(#pc-memA)\" stroke=\"none\"></path><path d=\"M8 32H56V46H8Z\" fill=\"url(#pc-memB)\" stroke=\"none\"></path><path d=\"M8 32H56\" stroke-dasharray=\"3 2.5\" stroke-linecap=\"butt\"></path><rect x=\"8\" y=\"18\" width=\"48\" height=\"28\"></rect></svg>"
+    },
+    {
+      "id": "heat-exchanger",
+      "name": "Heat exchanger",
+      "ports": {
+        "n": [
+          32,
+          20
+        ],
+        "e": [
+          56,
+          32
+        ],
+        "s": [
+          32,
+          44
+        ],
+        "w": [
+          8,
+          32
+        ]
+      },
+      "svg": "<svg data-icon=\"color/heat-exchanger\" data-name=\"Heat exchanger\" data-ports=\"n:32,20 e:56,32 s:32,44 w:8,32\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"8\" y=\"20\" width=\"48\" height=\"24\" rx=\"12\" fill=\"#c8d0da\"></rect><path d=\"M9 28H44A4 4 0 0 1 44 36H9\" stroke-width=\"6\" stroke-linecap=\"butt\"></path><path d=\"M9 28H44A4 4 0 0 1 44 36H9\" stroke=\"#e9a85a\" stroke-width=\"2\" stroke-linecap=\"butt\"></path><rect x=\"8\" y=\"20\" width=\"48\" height=\"24\" rx=\"12\"></rect></svg>"
+    },
+    {
+      "id": "battery",
+      "name": "Battery",
+      "ports": {
+        "n": [
+          32,
+          8
+        ],
+        "e": [
+          46,
+          34
+        ],
+        "s": [
+          32,
+          56
+        ],
+        "w": [
+          18,
+          34
+        ]
+      },
+      "svg": "<svg data-icon=\"color/battery\" data-name=\"Battery\" data-ports=\"n:32,8 e:46,34 s:32,56 w:18,34\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"26\" y=\"8\" width=\"12\" height=\"5\" rx=\"1\" fill=\"#9aa5b1\"></rect><rect x=\"18\" y=\"12\" width=\"28\" height=\"44\" rx=\"5\" fill=\"#eef2f2\"></rect><path d=\"M35 18L24 36H32L28 50L40 30H32Z\" fill=\"#f0cf8a\"></path></svg>"
+    },
+    {
+      "id": "wind-turbine",
+      "name": "Wind turbine",
+      "ports": {
+        "n": [
+          32,
+          4
+        ],
+        "e": [
+          50,
+          35.5
+        ],
+        "s": [
+          32,
+          60
+        ],
+        "w": [
+          14,
+          35.5
+        ]
+      },
+      "svg": "<svg data-icon=\"color/wind-turbine\" data-name=\"Wind turbine\" data-ports=\"n:32,4 e:50,35.5 s:32,60 w:14,35.5\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"1.5\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M30.6 26L29.6 60H34.4L33.4 26Z\" fill=\"#d6dbe0\"></path><path d=\"M32 22.5C30.5 16 30 9 31 4H33C34 9 33.5 16 32 22.5Z\" fill=\"#f7f9fa\"></path><path d=\"M32 22.5C30.5 16 30 9 31 4H33C34 9 33.5 16 32 22.5Z\" fill=\"#f7f9fa\" transform=\"rotate(120 32 25)\"></path><path d=\"M32 22.5C30.5 16 30 9 31 4H33C34 9 33.5 16 32 22.5Z\" fill=\"#f7f9fa\" transform=\"rotate(240 32 25)\"></path><circle cx=\"32\" cy=\"25\" r=\"2.6\" fill=\"#c8d0da\"></circle></svg>"
+    },
+    {
+      "id": "cooling-tower",
+      "name": "Cooling tower",
+      "ports": {
+        "n": [
+          32,
+          18
+        ],
+        "e": [
+          42,
+          37
+        ],
+        "s": [
+          32,
+          58
+        ],
+        "w": [
+          22,
+          37
+        ]
+      },
+      "svg": "<svg data-icon=\"color/cooling-tower\" data-name=\"Cooling tower\" data-ports=\"n:32,18 e:42,37 s:32,58 w:22,37\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M16 58Q26 36 20 18H44Q38 36 48 58Z\" fill=\"#c8d0da\"></path><path d=\"M21 17A5 5 0 0 1 26 9A6 6 0 0 1 37 8A5 5 0 0 1 43 17Z\" fill=\"#f7f9fa\"></path></svg>"
+    },
+    {
+      "id": "flare",
+      "name": "Flare",
+      "ports": {
+        "n": [
+          32,
+          4
+        ],
+        "e": [
+          35,
+          42
+        ],
+        "s": [
+          32,
+          60
+        ],
+        "w": [
+          29,
+          42
+        ]
+      },
+      "svg": "<svg data-icon=\"color/flare\" data-name=\"Flare\" data-ports=\"n:32,4 e:35,42 s:32,60 w:29,42\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"29\" y=\"27\" width=\"6\" height=\"30\" fill=\"#9aa5b1\"></rect><rect x=\"22\" y=\"56\" width=\"20\" height=\"4\" rx=\"1\" fill=\"#555b63\"></rect><path d=\"M32 4C39 10 41 15 41 19C41 24 37 27 32 27C27 27 23 24 23 19C23 15 26 12 27.5 9C28.5 13 30 14 32 14C31 11 31 7 32 4Z\" fill=\"#e9a85a\"></path><path d=\"M32 16C35 19 36 21 36 22.5C36 24.5 34 25.5 32 25.5C30 25.5 28 24.5 28 22.5C28 21 30 19 32 16Z\" fill=\"#f7e3a8\" stroke-width=\"1.25\"></path></svg>"
+    },
+    {
+      "id": "grid",
+      "name": "Grid connection",
+      "ports": {
+        "n": [
+          32,
+          12
+        ],
+        "e": [
+          47,
+          19.5
+        ],
+        "s": [
+          32,
+          58
+        ],
+        "w": [
+          17,
+          19.5
+        ]
+      },
+      "svg": "<svg data-icon=\"color/grid\" data-name=\"Grid connection\" data-ports=\"n:32,12 e:47,19.5 s:32,58 w:17,19.5\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M25 58L30 12H34L39 58Z\" fill=\"#c8d0da\"></path><path d=\"M28.3 34L35.8 41M35.7 34L28.2 41M27.6 44L36.6 52M36.4 44L27.4 52\" stroke-width=\"1.25\"></path><rect x=\"17\" y=\"18\" width=\"30\" height=\"3.5\" fill=\"#9aa5b1\"></rect><rect x=\"20\" y=\"28\" width=\"24\" height=\"3.5\" fill=\"#9aa5b1\"></rect><path d=\"M19 21.5V25.5M45 21.5V25.5M22 31.5V35.5M42 31.5V35.5\" stroke-width=\"2.5\"></path></svg>"
+    },
+    {
+      "id": "solar-panel",
+      "name": "Solar panel",
+      "ports": {
+        "n": [
+          36,
+          18
+        ],
+        "e": [
+          50,
+          32
+        ],
+        "s": [
+          28,
+          56
+        ],
+        "w": [
+          14,
+          32
+        ]
+      },
+      "svg": "<svg data-icon=\"color/solar-panel\" data-name=\"Solar panel\" data-ports=\"n:36,18 e:50,32 s:28,56 w:14,32\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M28 48V56M22 56H34\"></path><path d=\"M18 18H54L46 46H10Z\" fill=\"#f0cf8a\"></path><path d=\"M27 18L19 46M36 18L28 46M45 18L37 46\"></path><path d=\"M10 48H46\" stroke-width=\"3.5\"></path></svg>"
+    },
+    {
+      "id": "evaporator",
+      "name": "Evaporator",
+      "ports": {
+        "n": [
+          32,
+          8
+        ],
+        "e": [
+          46,
+          32
+        ],
+        "s": [
+          32,
+          56
+        ],
+        "w": [
+          18,
+          32
+        ]
+      },
+      "svg": "<svg data-icon=\"color/evaporator\" data-name=\"Evaporator\" data-ports=\"n:32,8 e:46,32 s:32,56 w:18,32\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M18 14A6 6 0 0 1 24 8H40A6 6 0 0 1 46 14V48L36 56H28L18 48Z\" fill=\"#c8d0da\"></path><path d=\"M19.1 28H44.9V47.5L35.6 54.9H28.4L19.1 47.5Z\" fill=\"#bfe6f7\" stroke=\"none\"></path><path d=\"M18 28H46\"></path><rect x=\"18\" y=\"34\" width=\"28\" height=\"10\" fill=\"#f5c1c8\"></rect><path d=\"M25 34V44M32 34V44M39 34V44\" stroke-width=\"1.5\"></path><path d=\"M26 23C28 21 28 19 26 17M32 23C34 21 34 19 32 17M38 23C40 21 40 19 38 17\" stroke-width=\"1.5\"></path><path d=\"M18 14A6 6 0 0 1 24 8H40A6 6 0 0 1 46 14V48L36 56H28L18 48Z\"></path></svg>"
+    },
+    {
+      "id": "mvc",
+      "name": "Mechanical vapor compression",
+      "ports": {
+        "n": [
+          47,
+          12.5
+        ],
+        "e": [
+          59,
+          38
+        ],
+        "s": [
+          19,
+          56
+        ],
+        "w": [
+          8,
+          38
+        ]
+      },
+      "svg": "<svg data-icon=\"color/mvc\" data-name=\"Mechanical vapor compression\" data-ports=\"n:47,12.5 e:59,38 s:19,56 w:8,38\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><defs><linearGradient id=\"pc-mvc\" x1=\"0\" x2=\"1\" y1=\"0\" y2=\"0\"><stop offset=\"0\" stop-color=\"#f6ecc9\"></stop><stop offset=\"1\" stop-color=\"#e9a85a\"></stop></linearGradient></defs><path d=\"M19 20V14H38M56 21H59V45H30\" stroke-width=\"2.5\"></path><rect x=\"8\" y=\"20\" width=\"22\" height=\"36\" rx=\"4\" fill=\"#c8d0da\"></rect><path d=\"M9.1 32H28.9V51A3.9 3.9 0 0 1 25 54.9H13A3.9 3.9 0 0 1 9.1 51Z\" fill=\"#bfe6f7\" stroke=\"none\"></path><path d=\"M8 32H30\"></path><rect x=\"8\" y=\"40\" width=\"22\" height=\"10\" fill=\"#f5c1c8\"></rect><path d=\"M14 40V50M19 40V50M24 40V50\" stroke-width=\"1.5\"></path><rect x=\"8\" y=\"20\" width=\"22\" height=\"36\" rx=\"4\"></rect><path d=\"M38 10L56 15V27L38 32Z\" fill=\"url(#pc-mvc)\"></path></svg>"
+    },
+    {
+      "id": "mill",
+      "name": "Mill",
+      "ports": {
+        "n": [
+          32,
+          16
+        ],
+        "e": [
+          54,
+          29
+        ],
+        "s": [
+          32,
+          54
+        ],
+        "w": [
+          10,
+          29
+        ]
+      },
+      "svg": "<svg data-icon=\"color/mill\" data-name=\"Mill\" data-ports=\"n:32,16 e:54,29 s:32,54 w:10,29\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M18 42L14 54M46 42L50 54\"></path><rect x=\"8\" y=\"54\" width=\"48\" height=\"4\" rx=\"1\" fill=\"#555b63\"></rect><rect x=\"10\" y=\"16\" width=\"44\" height=\"26\" rx=\"5\" fill=\"#9aa5b1\"></rect><rect x=\"24\" y=\"22\" width=\"16\" height=\"14\" rx=\"1\" fill=\"#e8ecec\"></rect><g stroke-width=\"1.25\" fill=\"#555b63\"><circle cx=\"28.5\" cy=\"32\" r=\"2.5\"></circle><circle cx=\"34\" cy=\"32.5\" r=\"2\"></circle><circle cx=\"31.5\" cy=\"28\" r=\"2\"></circle></g><path d=\"M18 16V42M46 16V42\" stroke=\"#555b63\" stroke-width=\"3\"></path><rect x=\"10\" y=\"16\" width=\"44\" height=\"26\" rx=\"5\"></rect></svg>"
+    },
+    {
+      "id": "reactor",
+      "name": "Reactor",
+      "ports": {
+        "n": [
+          21,
+          14
+        ],
+        "e": [
+          54,
+          40
+        ],
+        "s": [
+          32,
+          60
+        ],
+        "w": [
+          10,
+          40
+        ]
+      },
+      "svg": "<svg data-icon=\"color/reactor\" data-name=\"Reactor\" data-ports=\"n:21,14 e:54,40 s:32,60 w:10,40\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M10 28V48C10 56 20 60 32 60S54 56 54 48V28Z\" fill=\"#f5c1c8\"></path><path d=\"M14 22C14 14 22 12 32 12S50 14 50 22V48C50 54 42 56 32 56S14 54 14 48Z\" fill=\"#c8d0da\"></path><path d=\"M15.1 30H48.9V48C48.9 53 41 54.9 32 54.9S15.1 53 15.1 48Z\" fill=\"#bfe6f7\" stroke=\"none\"></path><path d=\"M14 30H50\"></path><path d=\"M14 22C14 14 22 12 32 12S50 14 50 22V48C50 54 42 56 32 56S14 54 14 48Z\"></path><path d=\"M32 10V45M24 45H40\"></path><path d=\"M24 41.5V48.5M40 41.5V48.5\" stroke-width=\"3\"></path><rect x=\"26\" y=\"2\" width=\"12\" height=\"8\" rx=\"1\" fill=\"#555b63\"></rect></svg>"
+    },
+    {
+      "id": "flow-reactor",
+      "name": "Flow reactor",
+      "ports": {
+        "n": [
+          16,
+          13
+        ],
+        "e": [
+          60,
+          32
+        ],
+        "s": [
+          48,
+          51
+        ],
+        "w": [
+          4,
+          32
+        ]
+      },
+      "svg": "<svg data-icon=\"color/flow-reactor\" data-name=\"Flow reactor\" data-ports=\"n:16,13 e:60,32 s:48,51 w:4,32\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M16 18V13M48 46V51\" stroke-width=\"3\"></path><rect x=\"10\" y=\"18\" width=\"44\" height=\"28\" rx=\"4\" fill=\"#f5c1c8\"></rect><rect x=\"4\" y=\"24\" width=\"56\" height=\"16\" rx=\"2\" fill=\"#c8d0da\"></rect><g stroke-width=\"1.25\" fill=\"#f0cf8a\"><circle cx=\"15\" cy=\"29\" r=\"2.2\"></circle><circle cx=\"21\" cy=\"29\" r=\"2.2\"></circle><circle cx=\"27\" cy=\"29\" r=\"2.2\"></circle><circle cx=\"33\" cy=\"29\" r=\"2.2\"></circle><circle cx=\"39\" cy=\"29\" r=\"2.2\"></circle><circle cx=\"45\" cy=\"29\" r=\"2.2\"></circle><circle cx=\"18\" cy=\"35\" r=\"2.2\"></circle><circle cx=\"24\" cy=\"35\" r=\"2.2\"></circle><circle cx=\"30\" cy=\"35\" r=\"2.2\"></circle><circle cx=\"36\" cy=\"35\" r=\"2.2\"></circle><circle cx=\"42\" cy=\"35\" r=\"2.2\"></circle><circle cx=\"48\" cy=\"35\" r=\"2.2\"></circle></g><path d=\"M10 24V40M54 24V40\" stroke-width=\"1.5\"></path></svg>"
+    },
+    {
+      "id": "chiller",
+      "name": "Chiller",
+      "ports": {
+        "n": [
+          32,
+          12
+        ],
+        "e": [
+          60,
+          36
+        ],
+        "s": [
+          32,
+          52
+        ],
+        "w": [
+          4,
+          36
+        ]
+      },
+      "svg": "<svg data-icon=\"color/chiller\" data-name=\"Chiller\" data-ports=\"n:32,12 e:60,36 s:32,52 w:4,36\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M28 12V8M36 52V56\" stroke-width=\"3\"></path><rect x=\"14\" y=\"12\" width=\"36\" height=\"40\" rx=\"3\" fill=\"#bfe6f7\"></rect><path d=\"M32 16V26M27.7 18.5L36.3 23.5M27.7 23.5L36.3 18.5\" stroke-width=\"1.5\"></path><path d=\"M4 36H18C18 30 24 30 24 36S30 42 30 36 36 30 36 36 42 42 42 36 46 36 46 36H60\" stroke-width=\"6.5\" stroke-linecap=\"butt\"></path><path d=\"M4 36H18C18 30 24 30 24 36S30 42 30 36 36 30 36 36 42 42 42 36 46 36 46 36H60\" stroke=\"#9aa5b1\" stroke-width=\"2.5\" stroke-linecap=\"butt\"></path></svg>"
+    },
+    {
+      "id": "filter",
+      "name": "Filter / treatment",
+      "ports": {
+        "n": [
+          32,
+          10
+        ],
+        "e": [
+          48,
+          32
+        ],
+        "s": [
+          32,
+          56
+        ],
+        "w": [
+          16,
+          32
+        ]
+      },
+      "svg": "<svg data-icon=\"color/filter\" data-name=\"Filter / treatment\" data-ports=\"n:32,10 e:48,32 s:32,56 w:16,32\" width=\"64\" height=\"64\" viewBox=\"0 0 64 64\" fill=\"none\" stroke=\"#1a1a1a\" stroke-width=\"2.25\" stroke-linecap=\"round\" stroke-linejoin=\"round\" xmlns=\"http://www.w3.org/2000/svg\"><rect x=\"16\" y=\"10\" width=\"32\" height=\"46\" rx=\"4\" fill=\"#c8d0da\"></rect><path d=\"M17.1 16H46.9V30H17.1Z\" fill=\"#bfe6f7\" stroke=\"none\"></path><path d=\"M17.1 30H46.9V42H17.1Z\" fill=\"#f0cf8a\" stroke=\"none\"></path><path d=\"M17.1 42H46.9V50H17.1Z\" fill=\"#9aa5b1\" stroke=\"none\"></path><path d=\"M16 30H48M16 42H48M16 50H48\" stroke-width=\"1.5\"></path><g fill=\"#1a1a1a\" stroke=\"none\"><circle cx=\"23\" cy=\"35\" r=\"0.9\"></circle><circle cx=\"30\" cy=\"38\" r=\"0.9\"></circle><circle cx=\"37\" cy=\"34\" r=\"0.9\"></circle><circle cx=\"42\" cy=\"38.5\" r=\"0.9\"></circle><circle cx=\"26\" cy=\"39.5\" r=\"0.9\"></circle></g><rect x=\"16\" y=\"10\" width=\"32\" height=\"46\" rx=\"4\"></rect></svg>"
+    }
+  ]
+}

@@ -106,6 +106,14 @@ def _(AQUA, BLUE, INK, MUTED, SURFACE, plt):
 
 
 @app.cell
+def _(DATA, mo):
+    # Rendered offline from diagram.py by tools/render_diagrams.py and committed
+    # beside the sweep data -- the renderer is not something Pyodide installs.
+    mo.image(src=f"{DATA}/flowsheet.svg", alt="Process flow diagram of the pump-scheduling plant")
+    return
+
+
+@app.cell
 def _(EXAMPLE, mo):
     _repo = f"https://github.com/flex-pse/flex-pse-examples/tree/main/examples/{EXAMPLE}"
     mo.callout(
