@@ -8,9 +8,8 @@ title = "Desalination scheduling"
 order = 20
 
 blurb = """
-A seawater plant with three parallel reverse osmosis trains optimizes its flow and recovery to \
-meet a monthly water demand. This example shows how changing the monthly production requirement \
-drastically changes the system trajectory and unit cost ($/AF)."""
+A seawater desalination plant has to hit a monthly water target. See how the size of that \
+target changes when the plant runs and what each acre-foot costs."""
 
 tags = ["MIQCP", "unit commitment", "1 month @ 15 min", "Gurobi", "~27k binaries"]
 

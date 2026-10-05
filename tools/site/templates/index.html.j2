@@ -29,10 +29,10 @@
       <button class="theme-toggle" type="button" hidden aria-pressed="false"></button>
     </div>
     <p class="lede">
-      A gallery of process-systems test problems built with
-      <a href="https://github.com/flex-pse/flexPSE">flex-pse</a> — industrial plants
-      scheduled against real tariffs, each one solved offline and laid out here as a
-      page you can explore without installing anything.
+      Example problems built with
+      <a href="https://github.com/flex-pse/flexPSE">flex-pse</a>: industrial plants
+      scheduled against real electricity tariffs. Each one opens in your browser,
+      nothing to install.
     </p>
     <p class="masthead-links">
       <a href="{{ repo_url }}">Source on GitHub</a>
@@ -49,30 +49,24 @@
   <div class="cols">
     <div>
       <p>
-        <strong>flex-pse</strong> is a process-systems toolbox for constrained
-        optimization over time-dependent industrial operations. You describe a
-        flowsheet — pumps, tanks, membranes, batteries — and it builds the Pyomo
-        model that decides how to run it: which units are on, at what duty, in
-        which hour, against a tariff that makes some hours far more expensive
-        than others.
+        <strong>flex-pse</strong> is a toolbox for scheduling industrial plants.
+        You describe the equipment (pumps, tanks, membranes, batteries) and it
+        builds a Pyomo model that decides what runs when, given that power costs
+        more at some hours than others.
       </p>
       <p>
-        Every example here is a complete problem instance rather than a toy: a
-        real flowsheet, a real tariff, and a question with a non-obvious answer.
-        Each has a page below, a model you can read, and a notebook that builds
-        and solves it.
+        Each example asks one question about a realistic plant. You get a page to
+        explore the answer, the model code, and a notebook that solves it.
       </p>
     </div>
     <div>
       <div class="note">
         <h3>How these pages work</h3>
         <p>
-          The optimization needs Pyomo, IDAES and a MILP solver, none of which
-          have a WebAssembly build — so nothing solves in your browser. Instead,
-          each model is solved offline across a sweep of one design parameter,
-          and the results are committed to the repository. The pages replay that
-          sweep: the charts, tables and controls are live, but the schedules
-          behind them were computed in advance.
+          The solvers don't run in a browser, so each model was solved ahead of
+          time for a range of one input. The pages let you flip through those
+          results. The charts and controls are live; the schedules aren't
+          re-solved.
         </p>
       </div>
     </div>
@@ -99,29 +93,21 @@
 <section class="start">
   <h2>Running them yourself</h2>
   <p>
-    The pages above are read-only replays. To change the problem — a different
-    tariff, a different demand, a different flowsheet — clone the repository and
-    run the solver-level notebooks:
+    To change the problem (a different tariff, demand, or flowsheet), clone the
+    repo and run the notebooks:
   </p>
 <pre><code>git clone {{ repo_url }}.git
 cd flex-pse-examples
-conda env create -f environment.yml
-conda activate flex-pse-examples
+pip install -e ".[notebooks]"
 
 marimo run examples/pump_scheduling/notebook.py</code></pre>
-  <p>
-    Regenerate a page's data with
-    <code>python tools/sweep.py examples/&lt;name&gt;</code>, and rebuild the site with
-    <code>python tools/site/build.py --out _site</code>. Adding a new example is
-    documented in <a href="{{ repo_url }}/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>.
-  </p>
 
   <div class="note">
     <p>
       <code>flex-pse</code> and this examples repository are maintained by the
-      Coherence Power team and the WE3 Lab at Stanford University. For bug reports 
-      and feature requests please open an issue on the <code>flex-pse</code> GitHub repository. 
-      To add examples, see the <a href="{{ repo_url }}/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a> file.
+      Coherence Power team and the WE3 Lab at Stanford University. For bugs and
+      feature requests, open an issue on the <code>flex-pse</code> GitHub repository.
+      To add an example, see <a href="{{ repo_url }}/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>.
     </p>
     <p>
       For support with custom analyses, please join our
@@ -135,9 +121,8 @@ marimo run examples/pump_scheduling/notebook.py</code></pre>
 
 <footer class="wrap">
   <p>
-    Built with <a href="https://marimo.io">marimo</a> and served from GitHub Pages.
-    The notebook pages load their Python runtime from a CDN, so they need a
-    network connection on first open.
+    Built with <a href="https://marimo.io">marimo</a>. The example pages load
+    Python from a CDN, so the first open needs an internet connection.
   </p>
 </footer>
 

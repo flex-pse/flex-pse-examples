@@ -9,9 +9,8 @@ order = 10
 
 # Two sentences. The landing-page card is a card, not a page.
 blurb = """
-A two-pump water plant fills a tank and is subject to time-of-use tariffs. The example shows \
-how we might change the pump scheduling strategy and the sizing of a behind-the-meter battery \
-based on the size of the system and the net water demand."""
+A two-pump water plant on a time-of-use tariff. Is it better to buy a bigger battery, or to \
+let the pumps run flexibly?"""
 
 tags = ["MILP", "storage vs flexibility", "24 h @ 1 h", "HiGHS"]
 
