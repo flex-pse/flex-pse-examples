@@ -75,6 +75,9 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: true
+          # Pinned: requires-python is open-ended, so uv otherwise grabs the newest
+          # CPython -- 3.15 arrived before sparsediffpy/cvxpy/highspy wheels did.
+          python-version: "3.13"
 
       # `flex-pse` is a core dependency, installed from an unpinned git
       # branch, and there's no committed uv.lock -- so this always resolves
@@ -153,6 +156,9 @@ jobs:
       - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           enable-cache: false
+          # Pinned: requires-python is open-ended, so uv otherwise grabs the newest
+          # CPython -- 3.15 arrived before sparsediffpy/cvxpy/highspy wheels did.
+          python-version: "3.13"
 
       - name: Install the project
         run: uv sync --group dev
