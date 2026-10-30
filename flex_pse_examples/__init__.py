@@ -33,8 +33,8 @@ def example_dir(name: str) -> Path:
 def load_model(name: str):
     """Import and return an example's ``model`` module.
 
-    Use its ``load_config()``/``build_model()``/``solve_model()`` to build and
-    solve, e.g. ``m = load_model("pump_scheduling"); cfg = m.load_config();
+    Use its ``load_inputs()``/``build_model()``/``solve_model()`` to build and
+    solve, e.g. ``m = load_model("pump_scheduling"); cfg = m.load_inputs();
     model = m.build_model(cfg); m.solve_model(model)``.
     """
     example_dir(name)

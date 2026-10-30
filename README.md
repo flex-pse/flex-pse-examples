@@ -41,7 +41,7 @@ Or from Python:
 from flex_pse_examples import list_examples, load_model
 
 m = load_model("pump_scheduling")
-model = m.build_model(m.load_config())
+model = m.build_model(m.load_inputs())
 m.solve_model(model)
 ```
 
@@ -73,8 +73,9 @@ also re-runs the solves weekly.
 ```
 examples/<name>/
   example.toml    site + sweep metadata
-  config.json     problem inputs
-  model.py        the model
+  model.py        the model, built in code
+  config.json     the flex-pse spec model.py emits (generated)
+  tariff.json     the tariff it names
   notebook.py     marimo notebook that builds and solves it
   sweep.py        sweep adapter for tools/sweep.py
   explore.py      the browser page (browser-safe imports only)

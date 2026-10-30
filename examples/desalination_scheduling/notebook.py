@@ -51,8 +51,8 @@ def _(mo, model):
     running flat out. The further below that the target sits, the more of the
     peak the plant can skip.
 
-    The flowsheet is in [`model.py`](model.py). Only the tariff comes from
-    `config.json`.
+    The flowsheet is in [`model.py`](model.py), the tariff in `tariff.json`, and
+    `config.json` is the flex-pse spec `model.py` writes from it.
     """)
     return
 
@@ -68,9 +68,11 @@ def _(diagram, mo, render_diagram):
 
 @app.cell
 def _(mo, model):
+    # Up to 95% of the ceiling, the top of the published sweep. Past it the
+    # month is barely feasible and a solve can run for the whole time limit.
     demand_slider = mo.ui.slider(
         start=100,
-        stop=280,
+        stop=5 * int(0.95 * model.max_product_af() // 5),
         step=5,
         value=model.DEMAND_AF_PER_MONTH,
         label="Water demand over the horizon (acre-feet)",
@@ -96,7 +98,8 @@ def _(mo, model):
         run_button,
         mo.md(rf"""
         - **Demand**: acre-feet delivered over the month. The slider stops at
-          280, just under the {model.max_product_af():,.0f} AF ceiling. Changing it
+          95% of the {model.max_product_af():,.0f} AF ceiling; the top few steps
+          can take minutes and may stop at the time limit with a gap. Changing it
           only re-solves; the model isn't rebuilt.
         - **Relax-and-fix tolerance**: solve the LP relaxation first, fix every
           on/off decision it already got within this distance of 0 or 1, then

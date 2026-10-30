@@ -28,8 +28,10 @@ build never solves anything.
 ```
 examples/<name>/
     example.toml          site + sweep metadata
-    config.json           the problem instance
-    model.py              the flex-pse flowsheet
+    model.py              the flex-pse flowsheet, built in code
+    extensions.py         @flexops.extension pieces with no spec element yet
+    tariff.json           the EECO tariff the model names
+    config.json           the flex-pse spec model.py emits -- generated
     notebook.py           the solver-level walkthrough
     sweep.py              the sweep adapter
     explore.py            the WebAssembly page
@@ -51,14 +53,23 @@ than in a reader's browser.
 **1. Create `examples/<name>/`**, `lower_snake_case`.
 → *`example.toml`'s `name` must equal the directory name.*
 
-**2. Add `config.json`** with at least `name` and `description`, alongside the
-parameters that define the instance.
-
-**3. Add `model.py`** — the flowsheet, and the only place `config.json` keys are
-read. Take the horizon, and anything that hardens the problem class, as keyword
-arguments rather than module constants; that is what makes a CI-sized smoke test
-possible later.
+**2. Add `model.py`** — the flowsheet, built in code. Take the horizon, and
+anything that hardens the problem class, as keyword arguments rather than module
+constants; that is what makes a CI-sized smoke test possible later. Parameters
+can live in the module or in a data file beside it (`pump_scheduling` keeps its
+instance in `inputs.json`); a tariff goes in `tariff.json` and reaches
+`FlexCosting` as `tariff_file=`, since a spec can name a file but not hold one.
 → *`tests/test_<name>.py`, which you write in step 9.*
+
+**3. Emit `config.json`** from the model with `flexops.emit_model`, as a
+`write_config()` in `model.py`. It is the flex-pse spec `flexops.build_model`
+turns back into the same model, so write it, never edit it. Treat
+`FlexEmitWarning` as an error: it names anything the spec can't express. A
+constraint you wrote by hand is the usual one. Prefer a `flexops.logic` helper,
+and otherwise move it into an `@flexops.extension` in `extensions.py`, imported
+by its package path (`flex_pse_examples.examples.<name>.extensions`) so the spec
+names a module that imports the same way everywhere.
+→ *a test that the committed `config.json` is current and rebuilds the model.*
 
 **4. Add `notebook.py`** — the solver-level walkthrough. Local only, so it may
 import anything. This is what the website links to when it says "for the real
@@ -86,8 +97,15 @@ CI will ever run.
 **6. Add the `[sweep]` block** to `example.toml` and generate the data:
 
 ```bash
-python tools/sweep.py examples/<name>
+python tools/sweep.py examples/<name>            # one point after another
+python tools/sweep.py examples/<name> --jobs 4   # four worker processes
 ```
+
+Points are independent, so `--jobs` solves them in parallel with joblib. Each
+worker calls `setup()` once and reuses its context for every point it gets, so
+`setup()` must not assume it sees every point, nor that points arrive in order.
+It pays off when points take seconds or more. For sub-second points, starting
+the workers costs more than it saves.
 
 `columns` prunes the results frame, and `[[sweep.views]]` reduces it — `window`
 for a few days at native resolution, `diurnal` for a time-of-day average, `full`

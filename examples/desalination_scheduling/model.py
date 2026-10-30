@@ -28,9 +28,15 @@ Every box and every junction in those diagrams is a flex-pse block wired with
 the three streams that cross the facility boundary are a ``Feed`` (seawater) and
 two ``Product``s (potable water, and the ocean outfall). None of the mass
 balances are written here: a ``Splitter`` carries conservation and deliberately
-no split fraction, so the routing stays the decision the objective makes. The
-one constraint this module still writes by hand is the recuperation window, and
-it is marked with the flex-pse issue that would remove it.
+no split fraction, so the routing stays the decision the objective makes. Nor
+is any operating rule: every one, the recuperation window included, is a
+``flexops.logic`` helper.
+
+That is what lets the model be written out. ``config.json`` is not
+hand-written: it is the flex-pse spec :func:`write_config` emits from
+:func:`main`'s model with ``flexops.emit_model``, and ``flexops.build_model``
+turns it back into that same model (:func:`build_from_config`). The only input
+outside it is the tariff, in ``tariff.json``, which the spec names.
 
 Every unit but the RO skids is a constant energy intensity — kWh per m^3 of
 whatever passes through it. The RO skids are constant intensity, which may
@@ -112,12 +118,15 @@ EECO after the fact.
 """
 
 import json
+import warnings
 from datetime import datetime
 from pathlib import Path
 
 import pyomo.environ as pyo
 from pyomo.environ import units as pyunits
 from pyomo.network import Arc
+
+import flexops
 
 # The blocks and unit models come off the top-level namespace, which is the
 # public API `docs/how_to/build_a_plant.md` is written against. The logic
@@ -137,6 +146,7 @@ from flexops import (
 )
 from flexops.logic import (
     add_conditional,
+    add_startup_delay,
     add_startup_shutdown,
     add_status,
     register_parallel_group,
@@ -144,7 +154,11 @@ from flexops.logic import (
     unrelax,
 )
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
+HERE = Path(__file__).parent
+TARIFF_PATH = HERE / "tariff.json"
+#: The emitted flex-pse spec of :func:`main`'s model. Written by
+#: :func:`write_config`, never by hand.
+CONFIG_PATH = HERE / "config.json"
 
 #: The scheduling horizon, module-level because the demand ceiling is a rate
 #: times its length: exactly one calendar month at 15-minute resolution. The step
@@ -332,10 +346,9 @@ def main(
         time_step=TIME_STEP_HR * pyunits.hr,
     )
     m.properties = SimpleAqueousFlow()
-    # The tariff is the one piece with no code form yet -- it is ~80 EECO rate
-    # rows, so it stays in config.json.
-    tariff = json.loads(CONFIG_PATH.read_text())["tariff"]
-    m.costing = FlexCosting(time_block=m.time_block, tariff=tariff)
+    # A file, not the parsed rows: a spec can name a tariff file but not hold a
+    # tariff object.
+    m.costing = FlexCosting(time_block=m.time_block, tariff_file=str(TARIFF_PATH))
 
     m.plant = PlantBlock(time_block=m.time_block)
     construct_plant(m)
@@ -553,7 +566,7 @@ def solve_relax_and_fix(m, *, tol: float = FIX_TOL, prefer: str | None = None):
     The gap against the relaxation's bound covers both.
 
     **The fixing ladder.** Fixing can cut off every feasible schedule -- pin
-    post-treatment on at a step and ``post_treatment_recuperation`` forces
+    post-treatment on at a step and its ``startup_delay`` forces
     ``ro[0]`` on there *and* forbids a restart in the preceding 45 minutes, which
     may be the only way the month meets its demand. So an infeasible re-solve is
     not an answer here; it steps the tolerance down (``tol``, ``tol/2``,
@@ -684,6 +697,54 @@ def report_cost(m):
         in.
     """
     return m.costing.report_cost(m)
+
+
+def write_config(path=None):
+    """Emit :func:`main`'s model, exact and at the default demand, as a spec.
+
+    ``flexops.emit_model`` rebuilds what it wrote and warns with
+    ``FlexEmitWarning`` about anything the spec cannot express; that warning is
+    an error here, so a spec that would rebuild a different model is never
+    written.
+
+    Args:
+        path: Where to write the spec; defaults to :data:`CONFIG_PATH`. The
+            tariff is written relative to its directory.
+
+    Returns:
+        The emitted ``FlowsheetSpec``.
+    """
+    from flexcore.config.io import dump_spec
+    from flexcore.exceptions import FlexEmitWarning
+
+    path = Path(path or CONFIG_PATH)
+    m = main()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FlexEmitWarning)
+        spec = flexops.emit_model(m, relative_to=path.parent)
+    dump_spec(spec, path)
+    return spec
+
+
+def build_from_config(path=None):
+    """Build the model ``config.json`` describes, with ``flexops.build_model``.
+
+    The result is :func:`main`'s exact model at the default demand, and takes
+    :func:`set_demand`, :func:`solve_relax_and_fix` and :func:`results_frame`
+    like one: the two plain attributes those read, which are bookkeeping and
+    not part of any spec, are set here.
+
+    Args:
+        path: A spec file; defaults to :data:`CONFIG_PATH`.
+
+    Returns:
+        The built ``pyo.ConcreteModel``.
+    """
+    m = flexops.build_model(Path(path or CONFIG_PATH))
+    m.is_relaxed = False
+    m.demand_af = pyo.value(m.plant.potable.delivery_min) / M3_PER_AF
+    return m
+
 
 def construct_plant(m):
 
@@ -956,11 +1017,11 @@ def construct_plant(m):
 
     # Each skid is off, or running anywhere in [min_feed, rated_feed] -- the
     # plant's whole scheduling freedom, and what makes this a MILP. The
-    # min-uptime is load-bearing on ro[0]: post_treatment_recuperation below
-    # linearizes "45 minutes past the restart" as a rolling sum of startups, and
-    # that is only valid while at most one startup falls inside any window.
-    # On ro[1] and ro[2] it earns nothing now that their cycling is free -- it
-    # just keeps the optimizer from switching a skid every 15 minutes.
+    # min-uptime keeps the optimizer from switching a skid every 15 minutes.
+    # It used to be load-bearing on ro[0], when the recuperation window below
+    # was a hand-written rolling sum of startups that only held while at most
+    # one startup fell inside it; add_startup_delay reads ro[0]'s status
+    # directly and needs no such guard.
     for i in plant.trains:
         add_status(
             plant.ro[i], plant.ro[i].feed, min_feed * _M3_HR, rated_feed * _M3_HR
@@ -985,30 +1046,26 @@ def construct_plant(m):
         N_TRAINS * rated_feed * RECOVERY_MAX * _M3_HR,
     )
 
-    @plant.Constraint(
-        tb.time_index,
-        doc="Recuperation: post-treatment may run only while the RO system is up "
-        "and at least 45 minutes past its restart. While it is out, "
-        "status_max_link pins its inlet -- the permeate header -- to zero, so "
-        "every drop all three skids make goes to the outfall off-spec.",
+    # Recuperation: post-treatment may run only while the RO system is up and at
+    # least 45 minutes past its restart. While it is out, status_max_link pins
+    # its inlet -- the permeate header -- to zero, so every drop all three skids
+    # make goes to the outfall off-spec.
+    #
+    # add_startup_delay writes post_treatment.status[t] <= ro[0].status[t - lag]
+    # for every lag in 0..recup_steps: ro[0] on, and on continuously across the
+    # whole window. With binaries that is exactly "on at t and no startup in the
+    # last recup_steps steps", the rolling sum of startups this used to be
+    # written as by hand -- and disaggregated per lag it is tighter under the LP
+    # relaxation solve_relax_and_fix starts from. (flex-pse#68 was the version
+    # that sampled only status[t-k]; this needs the whole-window fix.)
+    #
+    # ro[0] stands in for the whole RO system: the symmetry breaking below makes
+    # it the last skid off and the first back on. initially_on clamps the window
+    # at t=0, so a system already running at the start counts as warmed up
+    # rather than as having just started.
+    add_startup_delay(
+        plant.post_treatment, plant.ro[0], k=recup_steps, initially_on=True
     )
-    def post_treatment_recuperation(b, t):
-        # TODO(flex-pse#68) - replace with flexops.logic.add_startup_delay once
-        # it enforces the whole [t-k, t] window instead of lagging the upstream
-        # status by k. As shipped it samples only status[t-k], so a system that
-        # restarts inside the window passes, and it never checks status[t] at
-        # all -- post-treatment could run with every skid off. Re-checked against
-        # flex-pse main at 50ff1d8: still a single lagged sample, so this stays
-        # the one constraint in the flowsheet written out by hand.
-        #
-        # ro[0] stands in for the whole RO system: the symmetry breaking below
-        # makes it the last skid off and the first back on. startup is indexed
-        # from t=1 only, so a system already running at t=0 counts as warmed up
-        # rather than as having just started.
-        started = sum(
-            plant.ro[0].startup[s] for s in range(max(t - recup_steps + 1, 1), t + 1)
-        )
-        return plant.post_treatment.status[t] <= plant.ro[0].status[t] - started
 
     # Interchangeable skids make the MILP degenerate: many equal-cost solutions
     # differ only in which skid is on. Pin the order -- skid 2 only runs if 1 is
@@ -1020,7 +1077,7 @@ def construct_plant(m):
     #     units[0].status[t] >= units[1].status[t] >= ... >= units[-1].status[t]
     #
     # so ro[0] is the last skid off and the first back on, which is what lets
-    # post_treatment_recuperation use it as the proxy for the whole RO system.
+    # post-treatment's startup delay use it as the proxy for the whole RO system.
     #
     # This call used to pass reversed(), because the ordering ran the other way
     # before flex-pse #64. That was fixed in #76 (commit bc69357) and the
@@ -1059,9 +1116,9 @@ def peak_window_hours() -> list[int]:
     """Return the hours the tariff's demand-charge rows cover.
 
     Read off the tariff rather than hardcoded, so a tariff swap in
-    ``config.json`` moves the shaded bands in :func:`visualize` with it.
+    ``tariff.json`` moves the shaded bands in :func:`visualize` with it.
     """
-    tariff = json.loads(CONFIG_PATH.read_text())["tariff"]
+    tariff = json.loads(TARIFF_PATH.read_text())
     hours: set[int] = set()
     for row in tariff["tariff_data"]:
         if row.get("type") == "demand":
@@ -1192,7 +1249,7 @@ def results_frame(m):
     # Snap solver noise (and negative zeros) so an idle train reads as a clean 0.
     frame = frame.mask(frame.abs() < _FLOW_TOL_M3_HR, 0.0)
     frame["energy_price"] = price_series(
-        load_tariff(json.loads(CONFIG_PATH.read_text())["tariff"]), tb.datetime_index
+        load_tariff(TARIFF_PATH), tb.datetime_index
     ).to_numpy()
     # Set last: attrs do not survive every pandas operation, and the mask above
     # is one that returns a new frame.
@@ -1207,9 +1264,7 @@ def detail_window(frame, *, start=None, days: int = 3):
     Args:
         frame: A results frame from :func:`results_frame`.
         start: First timestamp of the window, as a string or Timestamp.
-            Defaults to the 14th day of the horizon -- read off the frame, not
-            from ``config.json``, whose ``reporting.detail_window`` sits in a
-            different year than the horizon built here.
+            Defaults to the 14th day of the horizon, read off the frame.
         days: Length of the window in days.
 
     Returns:
@@ -1301,9 +1356,7 @@ def visualize(source, *, start=None, days: int = 3):
             :func:`results_frame`. Passing the frame avoids a second extraction
             when the caller already has one.
         start: First timestamp of the window, as a string or Timestamp.
-            Defaults to the 14th day of the horizon -- read off the frame, not
-            from ``config.json``, whose ``reporting.detail_window`` sits in a
-            different year than the horizon built here.
+            Defaults to the 14th day of the horizon, read off the frame.
         days: Length of the window in days.
 
     Returns:
@@ -1510,7 +1563,9 @@ def visualize(source, *, start=None, days: int = 3):
 
 
 if __name__ == "__main__":
-    m = main()
+    write_config()
+    print(f"wrote {CONFIG_PATH.name}")
+    m = build_from_config()
     results = solve_relax_and_fix(m)
     print(results)
     print(
