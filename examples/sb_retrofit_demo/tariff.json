@@ -1,0 +1,80 @@
+{
+  "_comment": "EECO rate_data records. Peak window is 16:00-21:00 (hour_end exclusive), where energy is 4.5x the off-peak price and a monthly demand charge applies. FlexCosting prorates the monthly demand charge onto the horizon.",
+  "tariff_data": [
+    {
+      "utility": "electric",
+      "type": "customer",
+      "name": "fixed",
+      "assessed": "monthly",
+      "month_start": 1,
+      "month_end": 12,
+      "weekday_start": 0,
+      "weekday_end": 6,
+      "hour_start": 0,
+      "hour_end": 24,
+      "basic_charge_limit (metric)": 0,
+      "charge (metric)": 150.0,
+      "units": "$/month"
+    },
+    {
+      "utility": "electric",
+      "type": "demand",
+      "name": "peak_demand",
+      "assessed": "monthly",
+      "month_start": 1,
+      "month_end": 12,
+      "weekday_start": 0,
+      "weekday_end": 6,
+      "hour_start": 16,
+      "hour_end": 21,
+      "basic_charge_limit (metric)": 0,
+      "charge (metric)": 21.5,
+      "units": "$/kW"
+    },
+    {
+      "utility": "electric",
+      "type": "energy",
+      "name": "offpeak_energy",
+      "assessed": "",
+      "month_start": 1,
+      "month_end": 12,
+      "weekday_start": 0,
+      "weekday_end": 6,
+      "hour_start": 0,
+      "hour_end": 16,
+      "basic_charge_limit (metric)": 0,
+      "charge (metric)": 0.1,
+      "units": "$/kWh"
+    },
+    {
+      "utility": "electric",
+      "type": "energy",
+      "name": "peak_energy",
+      "assessed": "",
+      "month_start": 1,
+      "month_end": 12,
+      "weekday_start": 0,
+      "weekday_end": 6,
+      "hour_start": 16,
+      "hour_end": 21,
+      "basic_charge_limit (metric)": 0,
+      "charge (metric)": 0.45,
+      "units": "$/kWh"
+    },
+    {
+      "utility": "electric",
+      "type": "energy",
+      "name": "night_energy",
+      "assessed": "",
+      "month_start": 1,
+      "month_end": 12,
+      "weekday_start": 0,
+      "weekday_end": 6,
+      "hour_start": 21,
+      "hour_end": 24,
+      "basic_charge_limit (metric)": 0,
+      "charge (metric)": 0.1,
+      "units": "$/kWh"
+    }
+  ]
+}

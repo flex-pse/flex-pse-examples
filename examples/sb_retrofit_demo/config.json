@@ -1,0 +1,699 @@
+{
+  "schema_version": "0.1.0",
+  "name": "sb_retrofit_B_after",
+  "elements": [
+    {
+      "kind": "costing",
+      "name": "costing",
+      "tariff_source": "tariff.json"
+    },
+    {
+      "property_class": "SimpleAqueousFlow",
+      "kind": "property_package",
+      "name": "properties"
+    },
+    {
+      "start_date": "2026-07-01",
+      "end_date": "2026-08-01",
+      "time_step": "0.25 h",
+      "kind": "time"
+    },
+    {
+      "kind": "plant",
+      "name": "plant"
+    },
+    {
+      "kind": "set",
+      "name": "plant.trains",
+      "values": [
+        0,
+        1,
+        2
+      ]
+    },
+    {
+      "kind": "unit",
+      "name": "plant.battery",
+      "unit_model_class": "BatteryModel",
+      "construction_options": {
+        "capacity": {
+          "value": 1000.0,
+          "units": "kWh"
+        },
+        "power_charge_max": {
+          "value": 200.0,
+          "units": "kW"
+        },
+        "power_discharge_max": {
+          "value": 200.0,
+          "units": "kW"
+        },
+        "eta_charge": 0.95,
+        "eta_discharge": 0.95,
+        "soc_min": 0.1,
+        "soc_max": 0.95,
+        "initial_soc": 0.5
+      },
+      "property_package": null,
+      "io_variables": [
+        {
+          "name": "power_charge",
+          "role": "input",
+          "units": "kW"
+        },
+        {
+          "name": "power_discharge",
+          "role": "input",
+          "units": "kW"
+        },
+        {
+          "name": "power_electrical",
+          "role": "output",
+          "units": "kW"
+        },
+        {
+          "name": "charge",
+          "role": "output",
+          "units": "kWh"
+        }
+      ]
+    },
+    {
+      "kind": "unit",
+      "name": "plant.feed_header",
+      "unit_model_class": "Splitter",
+      "construction_options": {
+        "outlet_names": [
+          "t0",
+          "t1",
+          "t2"
+        ]
+      },
+      "costing_package": null,
+      "connections": [
+        {
+          "port": "outlet_t{i}",
+          "to": "plant.pretreatment[{i}].inlet",
+          "name": "header_to_pretreatment",
+          "index": "plant.trains",
+          "directed": false
+        }
+      ],
+      "io_variables": [
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        }
+      ]
+    },
+    {
+      "kind": "unit",
+      "name": "plant.intake_pump",
+      "unit_model_class": "Pump",
+      "construction_options": {
+        "power_relation": "constant_intensity",
+        "energy_intensity": {
+          "value": 0.157,
+          "units": "kWh/m^3"
+        }
+      },
+      "connections": [
+        {
+          "port": "outlet",
+          "to": "plant.feed_header.inlet",
+          "name": "intake_to_header"
+        }
+      ],
+      "io_variables": [
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        },
+        {
+          "name": "power_electrical",
+          "role": "output",
+          "units": "kW"
+        }
+      ]
+    },
+    {
+      "kind": "unit",
+      "name": "plant.outfall",
+      "unit_model_class": "Product",
+      "construction_options": {
+        "inlet_names": [
+          "brine_0",
+          "bypass_0",
+          "offspec_0",
+          "brine_1",
+          "bypass_1",
+          "offspec_1",
+          "brine_2",
+          "bypass_2",
+          "offspec_2"
+        ],
+        "resource_name": "outfall"
+      },
+      "costing_package": null,
+      "io_variables": [
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        }
+      ]
+    },
+    {
+      "kind": "unit",
+      "name": "plant.permeate_header",
+      "unit_model_class": "Mixer",
+      "construction_options": {
+        "inlet_names": [
+          "t0",
+          "t1",
+          "t2"
+        ]
+      },
+      "costing_package": null,
+      "connections": [
+        {
+          "port": "outlet",
+          "to": "plant.post_treatment.inlet",
+          "name": "header_to_post"
+        }
+      ],
+      "io_variables": [
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        }
+      ]
+    },
+    {
+      "kind": "unit",
+      "name": "plant.permeate_split",
+      "unit_model_class": "Splitter",
+      "construction_options": {
+        "outlet_names": [
+          "header",
+          "offspec"
+        ]
+      },
+      "costing_package": null,
+      "index": "plant.trains",
+      "connections": [
+        {
+          "port": "outlet_header",
+          "to": "plant.permeate_header.inlet_t{i}",
+          "name": "permeate_split_to_header",
+          "directed": false
+        },
+        {
+          "port": "outlet_offspec",
+          "to": "plant.outfall.inlet_offspec_{i}",
+          "name": "offspec_to_outfall",
+          "directed": false
+        }
+      ],
+      "io_variables": [
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        }
+      ]
+    },
+    {
+      "kind": "unit",
+      "name": "plant.post_treatment",
+      "unit_model_class": "ConstantEnergyIntensityModel",
+      "construction_options": {
+        "energy_intensity": {
+          "value": 0.11,
+          "units": "kWh/m^3"
+        }
+      },
+      "connections": [
+        {
+          "port": "outlet",
+          "to": "plant.product_pump.inlet",
+          "name": "post_to_product"
+        }
+      ],
+      "io_variables": [
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        },
+        {
+          "name": "power_electrical",
+          "role": "output",
+          "units": "kW"
+        }
+      ]
+    },
+    {
+      "kind": "unit",
+      "name": "plant.potable",
+      "unit_model_class": "Product",
+      "construction_options": {
+        "resource_name": "potable_water",
+        "min_demand": {
+          "value": 0.0,
+          "units": "m^3"
+        },
+        "demand_basis": "horizon"
+      },
+      "costing_package": null,
+      "io_variables": [
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        }
+      ]
+    },
+    {
+      "kind": "unit",
+      "name": "plant.pretreatment",
+      "unit_model_class": "ConstantEnergyIntensityModel",
+      "construction_options": {
+        "energy_intensity": {
+          "value": 0.01,
+          "units": "kWh/m^3"
+        }
+      },
+      "index": "plant.trains",
+      "connections": [
+        {
+          "port": "outlet",
+          "to": "plant.train_split[{i}].inlet",
+          "name": "pretreatment_to_split",
+          "directed": false
+        }
+      ],
+      "io_variables": [
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        },
+        {
+          "name": "power_electrical",
+          "role": "output",
+          "units": "kW"
+        }
+      ]
+    },
+    {
+      "kind": "unit",
+      "name": "plant.product_pump",
+      "unit_model_class": "Pump",
+      "construction_options": {
+        "power_relation": "constant_intensity",
+        "energy_intensity": {
+          "value": 0.3,
+          "units": "kWh/m^3"
+        }
+      },
+      "connections": [
+        {
+          "port": "outlet",
+          "to": "plant.potable.inlet_a",
+          "name": "product_to_delivery"
+        }
+      ],
+      "io_variables": [
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        },
+        {
+          "name": "power_electrical",
+          "role": "output",
+          "units": "kW"
+        }
+      ]
+    },
+    {
+      "kind": "unit",
+      "name": "plant.ro",
+      "unit_model_class": "ReverseOsmosis",
+      "construction_options": {
+        "recovery": 0.465,
+        "recovery_min": 0.4,
+        "recovery_max": 0.5,
+        "energy_intensity": {
+          "value": 3.2064,
+          "units": "kWh/m^3"
+        }
+      },
+      "index": "plant.trains",
+      "connections": [
+        {
+          "port": "outlet_a",
+          "to": "plant.permeate_split[{i}].inlet",
+          "name": "ro_to_permeate_split",
+          "directed": false
+        },
+        {
+          "port": "outlet_b",
+          "to": "plant.outfall.inlet_brine_{i}",
+          "name": "brine_to_outfall",
+          "directed": false
+        }
+      ],
+      "io_variables": [
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        },
+        {
+          "name": "power_electrical",
+          "role": "output",
+          "units": "kW"
+        }
+      ]
+    },
+    {
+      "kind": "unit",
+      "name": "plant.seawater",
+      "unit_model_class": "Feed",
+      "construction_options": {
+        "resource_name": "seawater"
+      },
+      "costing_package": null,
+      "connections": [
+        {
+          "port": "outlet_a",
+          "to": "plant.intake_pump.inlet",
+          "name": "seawater_to_intake"
+        }
+      ],
+      "io_variables": [
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        }
+      ]
+    },
+    {
+      "kind": "unit",
+      "name": "plant.train_split",
+      "unit_model_class": "Splitter",
+      "construction_options": {
+        "outlet_names": [
+          "ro",
+          "bypass"
+        ]
+      },
+      "costing_package": null,
+      "index": "plant.trains",
+      "connections": [
+        {
+          "port": "outlet_ro",
+          "to": "plant.ro[{i}].inlet",
+          "name": "split_to_ro",
+          "directed": false
+        },
+        {
+          "port": "outlet_bypass",
+          "to": "plant.outfall.inlet_bypass_{i}",
+          "name": "bypass_to_outfall",
+          "directed": false
+        }
+      ],
+      "io_variables": [
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        }
+      ]
+    },
+    {
+      "kind": "conditional",
+      "unit": "plant.ro[0]",
+      "implies": "plant.ro[1]"
+    },
+    {
+      "kind": "parallel_group",
+      "units": [
+        "plant.ro[0]",
+        "plant.ro[1]",
+        "plant.ro[2]"
+      ]
+    },
+    {
+      "kind": "startup_delay",
+      "unit": "plant.post_treatment",
+      "upstream": "plant.ro[0]",
+      "k": 3
+    },
+    {
+      "kind": "startup_shutdown",
+      "unit": "plant.ro",
+      "min_up": 3
+    },
+    {
+      "kind": "status",
+      "unit": "plant.intake_pump",
+      "variable": "flow_in",
+      "min_output": {
+        "value": 0.0,
+        "units": "m^3/h"
+      },
+      "max_output": {
+        "value": 1063.5,
+        "units": "m^3/h"
+      }
+    },
+    {
+      "kind": "status",
+      "unit": "plant.post_treatment",
+      "variable": "flow_in",
+      "min_output": {
+        "value": 0.0,
+        "units": "m^3/h"
+      },
+      "max_output": {
+        "value": 607.806,
+        "units": "m^3/h"
+      }
+    },
+    {
+      "kind": "status",
+      "unit": "plant.pretreatment",
+      "variable": "flow_in",
+      "min_output": {
+        "value": 0.0,
+        "units": "m^3/h"
+      },
+      "max_output": {
+        "value": 1063.5,
+        "units": "m^3/h"
+      }
+    },
+    {
+      "kind": "status",
+      "unit": "plant.ro",
+      "variable": "feed",
+      "min_output": {
+        "value": 337.67,
+        "units": "m^3/h"
+      },
+      "max_output": {
+        "value": 405.204,
+        "units": "m^3/h"
+      }
+    },
+    {
+      "kind": "fix",
+      "variable": "plant.intake_pump.status",
+      "value": 1.0
+    },
+    {
+      "kind": "fix",
+      "variable": "plant.pretreatment[*].status",
+      "value": 1.0
+    },
+    {
+      "kind": "fix",
+      "variable": "plant.seawater.withdrawal",
+      "value": 1063.5
+    },
+    {
+      "kind": "extension",
+      "name": "linear_recovery_window",
+      "entry_point": "flex_pse_examples.examples.sb_retrofit_demo.extensions:linear_recovery_window",
+      "options": {
+        "unit": "plant.ro[0]",
+        "recovery_min": 0.4,
+        "recovery_max": 0.5
+      }
+    },
+    {
+      "kind": "extension",
+      "name": "linear_recovery_window_2",
+      "entry_point": "flex_pse_examples.examples.sb_retrofit_demo.extensions:linear_recovery_window",
+      "options": {
+        "unit": "plant.ro[1]",
+        "recovery_min": 0.4,
+        "recovery_max": 0.5
+      }
+    },
+    {
+      "kind": "extension",
+      "name": "linear_recovery_window_3",
+      "entry_point": "flex_pse_examples.examples.sb_retrofit_demo.extensions:linear_recovery_window",
+      "options": {
+        "unit": "plant.ro[2]",
+        "recovery_min": 0.4,
+        "recovery_max": 0.5
+      }
+    },
+    {
+      "kind": "extension",
+      "name": "no_export",
+      "entry_point": "flex_pse_examples.examples.sb_retrofit_demo.extensions:no_export"
+    },
+    {
+      "kind": "extension",
+      "name": "terminal_charge",
+      "entry_point": "flex_pse_examples.examples.sb_retrofit_demo.extensions:terminal_charge",
+      "options": {
+        "battery": "plant.battery"
+      }
+    },
+    {
+      "kind": "objective"
+    }
+  ]
+}
