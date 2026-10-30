@@ -9,6 +9,7 @@ Every example has a page that runs in your browser, nothing to install.
 | --- | --- | --- | --- |
 | [Pump scheduling](examples/pump_scheduling/) | Bigger battery, or flexible pumps? | [open](https://flex-pse.github.io/flex-pse-examples/notebooks/pump_scheduling.html) | HiGHS |
 | [Desalination scheduling](examples/desalination_scheduling/) | How does a monthly water target change the cost per acre-foot? | [open](https://flex-pse.github.io/flex-pse-examples/notebooks/desalination_scheduling.html) | Gurobi |
+| [Santa Barbara retrofit](examples/sb_retrofit_demo/) | Same water, same month: what do extra membranes and a small battery do to the peak? | [open](https://flex-pse.github.io/flex-pse-examples/notebooks/sb_retrofit_demo.html) | HiGHS |
 
 The solvers don't run in a browser, so each model is solved ahead of time over a
 range of one input, and the results are committed as Parquet under

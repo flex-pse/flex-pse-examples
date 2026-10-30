@@ -34,6 +34,7 @@ dev = ["pytest", "jinja2>=3.1", "ruff"]
 "flex_pse_examples.examples" = "examples"
 "flex_pse_examples.examples.desalination_scheduling" = "examples/desalination_scheduling"
 "flex_pse_examples.examples.pump_scheduling" = "examples/pump_scheduling"
+"flex_pse_examples.examples.sb_retrofit_demo" = "examples/sb_retrofit_demo"
 
 [tool.setuptools]
 packages = [
@@ -42,6 +43,7 @@ packages = [
   "flex_pse_examples.examples",
   "flex_pse_examples.examples.desalination_scheduling",
   "flex_pse_examples.examples.pump_scheduling",
+  "flex_pse_examples.examples.sb_retrofit_demo",
 ]
 
 [tool.setuptools.package-data]
@@ -53,4 +55,8 @@ packages = [
 "flex_pse_examples.examples.pump_scheduling" = [
   "config.json", "inputs.json", "tariff.json", "example.toml", "public/pump_scheduling/*.parquet",
   "public/pump_scheduling/flowsheet.svg",
+]
+"flex_pse_examples.examples.sb_retrofit_demo" = [
+  "config.json", "tariff.json", "example.toml", "public/sb_retrofit_demo/*.parquet",
+  "public/sb_retrofit_demo/*.svg",
 ]
