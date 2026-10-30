@@ -228,9 +228,13 @@ _KWH_M3 = pyunits.kWh / pyunits.m**3
 
 #: One acre-foot in m^3. The demand is quoted in acre-feet because that is how a
 #: water contract is written; every flow in the flowsheet is metric.
-M3_PER_AF = pyo.value(
-    pyunits.convert(1 * pyunits.acre * pyunits.foot, pyunits.m**3)
-)
+#:
+#: Written out rather than converted through Pyomo's units: pint's ``acre`` has
+#: changed between releases (survey vs international foot), so the conversion
+#: moved by ~5 ppm with the installed pint, and the demand ``config.json``
+#: carries would not rebuild elsewhere. This is the international acre-foot,
+#: 43,560 ft^2 x 1 ft at 0.3048 m/ft, the US definition since 2023.
+M3_PER_AF = 43_560 * 0.3048**3
 
 #: Flows and draws below this read as zero. A MILP solver returns an idle train
 #: as a few nanolitres either side of nothing, and a negative flow plots as a

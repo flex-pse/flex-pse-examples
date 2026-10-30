@@ -312,7 +312,7 @@
       "construction_options": {
         "resource_name": "potable_water",
         "min_demand": {
-          "value": 326873.99444476306,
+          "value": 326872.68695009284,
           "units": "m^3"
         },
         "demand_basis": "horizon"
