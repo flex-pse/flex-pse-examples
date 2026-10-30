@@ -135,9 +135,17 @@ CASES: dict[str, dict] = {
     ),
 }
 
-#: HiGHS: a 0.2% gap, as upstream, and a backstop.
+#: HiGHS, with its log on. A 3% gap rather than upstream's 0.2%: HiGHS on a
+#: month of unit commitment spends nearly all its time closing that last
+#: fraction of a percent, and the bill moves far less than the gap.
 SOLVER = "highs"
-SOLVER_OPTIONS = {"highs": {"mip_rel_gap": 0.002, "time_limit": 1800}}
+SOLVER_OPTIONS = {"highs": {"mip_rel_gap": 0.03, "time_limit": 1800, "output_flag": True}}
+
+#: Relax-and-fix threshold: a relaxed status within this of 0 or 1 is taken as
+#: decided and fixed before the MIP. Higher than upstream's 0.1 because the
+#: semicontinuous skids and the battery leave more statuses fractional; the
+#: routine steps down on its own if fixing makes the month infeasible.
+FIX_TOL = 0.35
 
 _M3_HR = pyunits.m**3 / pyunits.hr
 _KWH_M3 = pyunits.kWh / pyunits.m**3
@@ -423,7 +431,7 @@ def solve_case(m, *, time_limit: float | None = None):
         desal.SOLVER_OPTIONS["highs"]["time_limit"] = time_limit
     started = perf_counter()
     if CASES[m.case]["schedule"] == "optimized":
-        results = desal.solve_relax_and_fix(m, prefer=SOLVER)
+        results = desal.solve_relax_and_fix(m, tol=FIX_TOL, prefer=SOLVER)
     else:
         results = desal.solve_model(m, prefer=SOLVER)
         m.relaxation_gap = None
