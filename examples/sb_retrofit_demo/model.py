@@ -139,7 +139,7 @@ CASES: dict[str, dict] = {
 #: month of unit commitment spends nearly all its time closing that last
 #: fraction of a percent, and the bill moves far less than the gap.
 SOLVER = "highs"
-SOLVER_OPTIONS = {"highs": {"mip_rel_gap": 0.03, "time_limit": 1800, "output_flag": True}}
+SOLVER_OPTIONS = {"highs": {"mip_rel_gap": 0.03, "time_limit": 1800}}
 
 #: Relax-and-fix threshold: a relaxed status within this of 0 or 1 is taken as
 #: decided and fixed before the MIP. Higher than upstream's 0.1 because the
@@ -416,10 +416,40 @@ def operator_product_m3(m) -> float:
 # ---------------------------------------------------------------------------
 
 
+#: Stream the solver's log to stdout. On by default so a month-long solve
+#: shows its gap closing; set False for quiet runs.
+TEE = True
+
+
+def _solve_model_tee(m, prefer=None):
+    """Upstream ``solve_model``, with the solver log streamed (``tee``)."""
+    from flexcore.solvers import get_solver
+
+    desal._register_gurobi_for_quadratics()
+    solver = get_solver(model=m, prefer=prefer or desal.SOLVER)
+    results = solver.solve(
+        m, options=dict(desal.SOLVER_OPTIONS.get(solver.name, {})), tee=TEE
+    )
+    lower, upper = results.problem.lower_bound, results.problem.upper_bound
+    m.mip_gap = (
+        0.0 if lower is None or upper is None or not upper
+        else abs(upper - lower) / abs(upper)
+    )
+    for entry in m.costing.aggregate_power.values():
+        if entry.value is not None and abs(entry.value) < 1e-6:
+            entry.set_value(0.0, skip_validation=True)
+    return results
+
+
 def _use_highs_options():
-    """Point the upstream solve helpers at HiGHS with this example's options."""
+    """Point the upstream solve helpers at HiGHS with this example's options.
+
+    ``solve_relax_and_fix`` calls ``solve_model`` through its module, so
+    swapping that name in routes every solve through :func:`_solve_model_tee`.
+    """
     desal.SOLVER = SOLVER
     desal.SOLVER_OPTIONS.update(SOLVER_OPTIONS)
+    desal.solve_model = _solve_model_tee
 
 
 def solve_case(m, *, time_limit: float | None = None):
