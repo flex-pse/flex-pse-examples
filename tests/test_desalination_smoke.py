@@ -36,6 +36,9 @@ A green run here means the flowsheet still builds and the scheduling logic still
 holds together. It does not mean the published month is still right.
 """
 
+from contextlib import contextmanager
+from datetime import datetime
+
 import pytest
 
 pytest.importorskip("flexops", reason="needs the flex-pse environment")
@@ -57,29 +60,31 @@ SOLVE_TIME_LIMIT_S = 300
 @pytest.fixture(scope="module")
 def model():
     """The example's ``model`` module, under a name unique to this example."""
-    if not (EXAMPLE / "config.json").exists():
-        pytest.skip("examples/desalination_scheduling/config.json is missing")
+    if not (EXAMPLE / "tariff.json").exists():
+        pytest.skip("examples/desalination_scheduling/tariff.json is missing")
     return load_example_module(EXAMPLE)
+
+
+@contextmanager
+def short_horizon(model, start=SMOKE_START, end=SMOKE_END):
+    """Point ``model``'s module-level horizon at ``[start, end)`` for a while."""
+    hours = (
+        datetime.fromisoformat(end) - datetime.fromisoformat(start)
+    ).total_seconds() / 3600.0
+    original = (model.START_DATE, model.END_DATE, model.HORIZON_HOURS)
+    model.START_DATE, model.END_DATE, model.HORIZON_HOURS = start, end, hours
+    try:
+        yield
+    finally:
+        model.START_DATE, model.END_DATE, model.HORIZON_HOURS = original
 
 
 @pytest.fixture(scope="module")
 def solved(model):
     """A two-day, recovery-fixed month, solved with HiGHS."""
-    from datetime import datetime
-
     import pyomo.environ as pyo
 
-    hours = (
-        datetime.fromisoformat(SMOKE_END) - datetime.fromisoformat(SMOKE_START)
-    ).total_seconds() / 3600.0
-
-    original = (model.START_DATE, model.END_DATE, model.HORIZON_HOURS)
-    model.START_DATE, model.END_DATE, model.HORIZON_HOURS = (
-        SMOKE_START,
-        SMOKE_END,
-        hours,
-    )
-    try:
+    with short_horizon(model):
         # Comfortably inside the ceiling: near it the problem gets hard, which is
         # the example's point but not this test's.
         m = model.main(demand_af=0.6 * model.max_product_af())
@@ -101,8 +106,6 @@ def solved(model):
         results = solver.solve(m)
         pyo.assert_optimal_termination(results)
         yield m, model.results_frame(m)
-    finally:
-        model.START_DATE, model.END_DATE, model.HORIZON_HOURS = original
 
 
 def test_the_flowsheet_still_builds_and_solves(solved):
@@ -203,3 +206,67 @@ def test_no_permeate_reaches_the_header_while_post_treatment_is_out(solved):
     assert frame.loc[out, "onspec_permeate_m3_per_hr"].max() < 1e-6, (
         "permeate reached the header while post-treatment was out"
     )
+
+
+#: One day is enough for the spec checks below: nothing in ``config.json`` but
+#: its ``time`` element depends on the horizon, and they never solve.
+SPEC_END = "2026-07-02"
+
+
+def _without_time(spec: dict) -> list:
+    """A spec's elements with the horizon-dependent ``time`` element left out."""
+    return [e for e in spec["elements"] if e["kind"] != "time"]
+
+
+def test_config_is_current(model, tmp_path):
+    """The committed ``config.json`` is what ``write_config`` emits today.
+
+    Emitted from a one-day build and compared with its ``time`` element left
+    out, since a month takes a minute to emit and the horizon is the only part
+    that differs. ``FlexEmitWarning`` is an error, as in ``write_config``: it
+    is what says the spec would rebuild a different model.
+
+    Fails when ``model.py`` changed and nobody re-ran
+    ``python examples/desalination_scheduling/model.py`` to rewrite the spec.
+    """
+    import json
+    import warnings
+
+    import flexops
+    from flexcore.config.io import dump_spec
+    from flexcore.exceptions import FlexEmitWarning
+
+    with short_horizon(model, end=SPEC_END), warnings.catch_warnings():
+        warnings.simplefilter("error", FlexEmitWarning)
+        spec = flexops.emit_model(model.main(), relative_to=model.CONFIG_PATH.parent)
+    fresh = tmp_path / "config.json"
+    dump_spec(spec, fresh)
+    committed = json.loads(model.CONFIG_PATH.read_text())
+    assert _without_time(json.loads(fresh.read_text())) == _without_time(committed)
+
+
+def test_config_rebuilds_the_model(model, tmp_path):
+    """``config.json`` builds the same model ``main`` makes in code.
+
+    The committed spec, cut to one day, is rebuilt with ``build_from_config``
+    and compared component by component -- variables with their bounds,
+    domains and fixed values, constraints, arcs and the objective.
+    """
+    import json
+    import shutil
+
+    from flexops.core.compare import assert_models_equivalent
+
+    spec = json.loads(model.CONFIG_PATH.read_text())
+    for element in spec["elements"]:
+        if element["kind"] == "time":
+            element["start_date"], element["end_date"] = SMOKE_START, SPEC_END
+    # Beside the tariff it names, which resolves against the spec's directory.
+    shutil.copy(model.TARIFF_PATH, tmp_path / model.TARIFF_PATH.name)
+    (tmp_path / "config.json").write_text(json.dumps(spec))
+
+    rebuilt = model.build_from_config(tmp_path / "config.json")
+    with short_horizon(model, end=SPEC_END):
+        built = model.main()
+    assert_models_equivalent(built, rebuilt)
+    assert rebuilt.demand_af == pytest.approx(built.demand_af)

@@ -47,7 +47,7 @@ def _(mo):
     battery, so there are four cases. All four pump the same water with the same
     energy, so the only difference in cost is *when* that energy gets bought.
 
-    Inputs are in `config.json` and the model is in `model.py`.
+    Inputs are in `inputs.json`, the model is in `model.py`, and `config.json` is the flex-pse spec `model.py` writes for the selected case.
     """)
     return
 
@@ -63,9 +63,9 @@ def _(diagram, mo, render_diagram):
 
 @app.cell
 def _(mo, model):
-    cfg = model.load_config()
+    cfg = model.load_inputs()
     peak_kw = model.reference_load_kw(cfg)
-    peak_hours = model.peak_window_hours(cfg)
+    peak_hours = model.peak_window_hours()
     flat_duty = model.inflexible_flow_m3_per_hr(cfg)
     _sizes = cfg["battery"]["sizing_options"]
     _duration = cfg["battery"]["storage_duration_hours"]
@@ -321,7 +321,7 @@ def _(base, mo):
     mo.md(f"""
     ## One case up close: {base["label"]}
 
-    Change `scenarios.selected` in `config.json` to look at a different case.
+    Change `scenarios.selected` in `inputs.json` to look at a different case.
     """)
     return
 

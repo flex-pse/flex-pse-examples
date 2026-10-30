@@ -14,14 +14,14 @@ whole sweep is cheap enough to regenerate on a whim.
 import model
 
 #: Battery power ratings to sweep, as fractions of the plant's peak electrical
-#: load (the same basis ``config.json`` uses for its ``sizing_options``). 0.0 is
+#: load (the same basis ``inputs.json`` uses for its ``sizing_options``). 0.0 is
 #: no battery at all, which is the honest left-hand end of the trade-off; 1.0 is
-#: the config's "large". The config's two named options, 0.4 and 1.0, are both on
+#: the inputs' "large". The inputs' two named options, 0.4 and 1.0, are both on
 #: the grid on purpose, so the notebook's 2x2 is reproduced exactly rather than
 #: interpolated.
 FRACTIONS = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
 
-#: The reduced sweep CI runs. Both strategies at the config's two named battery
+#: The reduced sweep CI runs. Both strategies at the inputs' two named battery
 #: sizes -- exactly the notebook's 2x2, which is what the assertions are written
 #: against -- and nothing else.
 SMOKE_FRACTIONS = (0.4, 1.0)
@@ -42,15 +42,15 @@ def points(*, smoke: bool = False) -> list[dict]:
 
 
 def setup(*, smoke: bool = False) -> dict:
-    """Load the config once. Every point rebuilds its own model from it."""
-    return model.load_config()
+    """Load the inputs once. Every point rebuilds its own model from them."""
+    return model.load_inputs()
 
 
 def solve_point(cfg: dict, point: dict):
     """Build, solve and summarize one (strategy, battery size) pair.
 
     Args:
-        cfg: The config from :func:`setup`.
+        cfg: The inputs from :func:`setup`.
         point: One dict from :func:`points`.
 
     Returns:
@@ -61,9 +61,9 @@ def solve_point(cfg: dict, point: dict):
     peak_kw = model.reference_load_kw(cfg)
     duration = cfg["battery"]["storage_duration_hours"]
 
-    # `build_model` takes a *name* from config's sizing_options, not a number, so
+    # `build_model` takes a *name* from the inputs' sizing_options, not a number, so
     # sweeping off-grid fractions means writing the fraction into a copy of the
-    # config under a private key. A fraction of 0 gets no battery block at all,
+    # inputs under a private key. A fraction of 0 gets no battery block at all,
     # which is not the same as a battery rated at zero: the latter still carries
     # SOC bounds and round-trip losses the plant cannot use.
     sizing = None
@@ -76,8 +76,8 @@ def solve_point(cfg: dict, point: dict):
     model.solve_model(m)
 
     report = m.costing.report_cost(m)
-    frame = model.results_frame(m, cfg)
-    in_peak = frame.index.hour.isin(model.peak_window_hours(cfg))
+    frame = model.results_frame(m)
+    in_peak = frame.index.hour.isin(model.peak_window_hours())
 
     return frame, {
         "strategy": "flexible" if point["flexible"] else "inflexible",

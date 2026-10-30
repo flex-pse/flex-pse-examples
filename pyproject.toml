@@ -17,6 +17,7 @@ dependencies = [
   "numpy",
   "matplotlib",
   "duckdb>=1.1",
+  "joblib>=1.4",
 ]
 
 [project.optional-dependencies]
@@ -46,10 +47,10 @@ packages = [
 [tool.setuptools.package-data]
 "flex_pse_examples.diagrams" = ["icons.json"]
 "flex_pse_examples.examples.desalination_scheduling" = [
-  "config.json", "example.toml", "public/desalination_scheduling/*.parquet",
+  "config.json", "tariff.json", "example.toml", "public/desalination_scheduling/*.parquet",
   "public/desalination_scheduling/flowsheet.svg",
 ]
 "flex_pse_examples.examples.pump_scheduling" = [
-  "config.json", "example.toml", "public/pump_scheduling/*.parquet",
+  "config.json", "inputs.json", "tariff.json", "example.toml", "public/pump_scheduling/*.parquet",
   "public/pump_scheduling/flowsheet.svg",
 ]

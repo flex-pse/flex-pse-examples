@@ -1,4 +1,4 @@
-"""Pump scheduling: build the flex-pse model from ``config.json``.
+"""Pump scheduling: build the flex-pse model from code and write it to ``config.json``.
 
 The problem. A **feed pump** lifts water across a fixed pressure differential
 into a **storage tank**; a **product pump** draws from that tank and delivers a
@@ -15,9 +15,9 @@ against two battery sizes.
 * **Flexible.** The feed pump is either off, or running anywhere in
   ``[min_flow_fraction, 1.0]`` of its rated flow, and the optimizer picks the
   hourly schedule. That "off, or somewhere in a band" behavior is a
-  semicontinuous variable, built by :func:`flexops.logic.add_status`, which
-  attaches an on/off binary and the two links pinning flow to it — so the
-  flexible model is a MILP.
+  semicontinuous variable, built by the ``semicontinuous_flow`` extension
+  around :func:`flexops.logic.add_status`, which attaches an on/off binary and
+  the two links pinning flow to it — so the flexible model is a MILP.
 * **Inflexible.** The feed pump runs at a 100% duty cycle: never off, never
   modulating, pinned for all 24 hours at the single constant flow that meets
   the day's demand (:func:`inflexible_flow_m3_per_hr`). No status binary is
@@ -31,10 +31,16 @@ the cost difference is purely a matter of *when* that energy is bought. A pump
 pinned at rated flow for 24 hours would instead over-pump the tank by a third
 of a day's demand, and the comparison would be dominated by spilled water.
 
-``flexops`` has no config-to-model bridge yet
-(:meth:`OpsBlockData.build_from_config` raises ``NotImplementedError``), so
-:func:`build_model` does that wiring by hand and is the only place config keys
-are read.
+The problem instance -- sizing, demand profile, battery options, the 2x2 -- is
+in ``inputs.json``, and the tariff is in ``tariff.json``. :func:`build_model`
+wires a model from them in code and is the only place input keys are read.
+``config.json`` is not hand-written: it is the flex-pse spec
+:func:`write_config` emits from the selected scenario's model with
+``flexops.emit_model``, and ``flexops.build_model`` turns it back into that same
+model (:func:`build_from_config`). Everything without a spec element of its own
+-- the feed pump's semicontinuous band and the two terminal conditions -- is an
+``@flexops.extension`` in ``extensions.py``, so the spec names it instead of
+dropping it.
 
 Two modeling choices are worth calling out, because both were forced by how the
 library composes and neither is obvious:
@@ -65,32 +71,43 @@ library composes and neither is obvious:
 """
 
 import json
+import warnings
 from pathlib import Path
 
 import pyomo.environ as pyo
 from pyomo.environ import units as pyunits
 from pyomo.network import Arc
 
-from flexops.core.time_block import TimeBlock
-from flexops.costing import FlexCosting
-from flexops.logic import add_status
-from flexops.properties.simple_aqueous import SimpleAqueousFlow
-from flexops.unit_models import BatteryModel, Pump, Tank
+import flexops
+from flexops import BatteryModel, FlexCosting, Pump, SimpleAqueousFlow, Tank, TimeBlock
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
+# By package path, not as a sibling module: the extension elements in
+# config.json name these functions by where they were imported from.
+from flex_pse_examples.examples.pump_scheduling.extensions import (
+    semicontinuous_flow,
+    terminal_charge,
+    terminal_volume,
+)
+
+HERE = Path(__file__).parent
+INPUTS_PATH = HERE / "inputs.json"
+TARIFF_PATH = HERE / "tariff.json"
+#: The emitted flex-pse spec of the selected scenario. Written by
+#: :func:`write_config`, never by hand.
+CONFIG_PATH = HERE / "config.json"
 
 _BAR = 1e5 * pyunits.Pa
 
 
-def load_config(path=None) -> dict:
-    """Load and validate the example's config.
+def load_inputs(path=None) -> dict:
+    """Load and validate the example's problem instance.
 
     Args:
-        path: Path to a config JSON; defaults to this example's
-            :data:`CONFIG_PATH`.
+        path: Path to an inputs JSON; defaults to this example's
+            :data:`INPUTS_PATH`.
 
     Returns:
-        The parsed config dict.
+        The parsed inputs dict.
 
     Raises:
         ValueError: If the demand profile does not have one value per time
@@ -98,7 +115,7 @@ def load_config(path=None) -> dict:
             inflexible strategy's constant duty falls outside the feed pump's
             operating band.
     """
-    cfg = json.loads(Path(path or CONFIG_PATH).read_text())
+    cfg = json.loads(Path(path or INPUTS_PATH).read_text())
 
     time = cfg["time"]
     span_hours = (
@@ -187,7 +204,7 @@ def reference_load_kw(cfg: dict) -> float:
     battery is rated to carry this whole load, an "80%" one four fifths of it.
 
     Args:
-        cfg: The loaded config.
+        cfg: The loaded inputs.
 
     Returns:
         The peak combined pump load, in kW.
@@ -218,7 +235,7 @@ def inflexible_flow_m3_per_hr(cfg: dict) -> float:
     convention or the pinned schedule is infeasible by construction.
 
     Args:
-        cfg: The loaded config.
+        cfg: The loaded inputs.
 
     Returns:
         The constant feed flow, in m^3/hr.
@@ -234,7 +251,7 @@ def build_model(cfg: dict, *, flexible: bool = True, battery_sizing: str | None 
     """Build the pump scheduling model.
 
     Args:
-        cfg: The loaded config (see :func:`load_config`).
+        cfg: The loaded inputs (see :func:`load_inputs`).
         flexible: ``True`` to let the optimizer schedule the feed pump over its
             semicontinuous band (a MILP), ``False`` to pin it at the constant
             duty from :func:`inflexible_flow_m3_per_hr` (an LP).
@@ -270,7 +287,9 @@ def build_model(cfg: dict, *, flexible: bool = True, battery_sizing: str | None 
         has_pressure=True,
         density=fluid["density_kg_per_m3"] * pyunits.kg / pyunits.m**3,
     )
-    m.costing = FlexCosting(time_block=tb, tariff=cfg["tariff"])
+    # A file, not the parsed rows: a spec can name a tariff file but not hold a
+    # tariff object.
+    m.costing = FlexCosting(time_block=tb, tariff_file=str(TARIFF_PATH))
 
     m.feed_pump = Pump(
         property_package=m.properties,
@@ -314,33 +333,33 @@ def build_model(cfg: dict, *, flexible: bool = True, battery_sizing: str | None 
         # The user/product delivery is the plant's fixed obligation.
         m.product_pump.outlet_state.flow_vol_phase[t, "Liq"].fix(demand[t])
 
-    # add_status indexes its output variable by time alone, so expose the
-    # [t, phase] flow state as a time-only Reference first (the same idiom
-    # Tank.flow_in uses). The inflexible branch reuses the same Reference.
-    m.feed_pump.flow_in = pyo.Reference(
-        m.feed_pump.inlet_state.flow_vol_phase[:, "Liq"]
-    )
+    # Fixed on the [t, phase] state itself rather than through a Reference:
+    # a spec's fix elements are applied before its extensions run, so they
+    # have to name a variable the pump builds on its own.
+    feed_flow = m.feed_pump.inlet_state.flow_vol_phase
     if flexible:
         # Off, or anywhere in [min_flow_fraction, 1.0] x rated flow.
-        rated = feed["rated_flow_m3_per_hr"] * pyunits.m**3 / pyunits.hr
-        add_status(
-            m.feed_pump, m.feed_pump.flow_in, feed["min_flow_fraction"] * rated, rated
+        rated = feed["rated_flow_m3_per_hr"]
+        semicontinuous_flow(
+            m,
+            unit="feed_pump",
+            min_flow=feed["min_flow_fraction"] * rated,
+            max_flow=rated,
         )
     else:
         # 100% duty cycle: one constant flow, held over every interval. No
         # status binary, so the feed pump contributes no degrees of freedom.
         flat = inflexible_flow_m3_per_hr(cfg)
         for t in list(tb.time_index)[1:]:
-            m.feed_pump.flow_in[t].fix(flat)
+            feed_flow[t, "Liq"].fix(flat)
 
     # t=0 is the rolling-horizon initial-state snapshot: Tank pins volume[0] to
     # initial_volume, so the holdup equation never sees the feed flow there and
     # any water pumped at t=0 simply vanishes. Left free it is a phantom the
     # flexible strategy zeroes out and the inflexible one pays for, which would
     # charge one strategy for a modeling artifact rather than for its schedule.
-    m.feed_pump.flow_in[0].fix(0.0)
+    feed_flow[0, "Liq"].fix(0.0)
 
-    n = tb.n_points
     if battery_sizing is not None:
         battery_cfg = cfg["battery"]
         options = battery_cfg["sizing_options"]
@@ -363,24 +382,16 @@ def build_model(cfg: dict, *, flexible: bool = True, battery_sizing: str | None 
             initial_soc=battery_cfg["initial_soc"],
             costing_package=m.costing,
         )
-        # Without this the schedule ends the horizon empty, selling off stored
-        # energy it never has to buy back.
-        m.battery_terminal = pyo.Constraint(
-            expr=m.battery.charge[n - 1] >= m.battery.charge_init,
-            doc="End the horizon at least as charged as it started.",
-        )
+        terminal_charge(m, battery="battery")
+
+    terminal_volume(m, tank="tank", volume=tank_cfg["terminal_volume_m3"])
 
     m.costing.cost_process()
     m.objective = pyo.Objective(
         expr=m.costing.aggregate_operating_cost, sense=pyo.minimize
     )
-    # Likewise for water: without a terminal volume the schedule just drains the
-    # tank and under-pumps.
-    m.tank_terminal = pyo.Constraint(
-        expr=m.tank.volume[n - 1] >= tank_cfg["terminal_volume_m3"],
-        doc="End the horizon at least as full as the terminal target.",
-    )
-    # Plain attributes, for reporting.
+    # Plain attributes, for reporting. Not part of the spec: a model rebuilt
+    # from config.json does not carry them.
     m.battery_sizing = battery_sizing
     m.is_flexible = flexible
     return m
@@ -405,13 +416,60 @@ def solve_model(m, *, prefer: str = "highs"):
     return results
 
 
-def results_frame(m, cfg: dict):
+def write_config(cfg: dict, path=None):
+    """Emit the selected scenario's model as a flex-pse spec.
+
+    Builds the scenario named by ``scenarios.selected``, reads its spec back
+    with ``flexops.emit_model`` and saves it. ``emit_model`` rebuilds what it
+    wrote and warns with ``FlexEmitWarning`` about anything the spec cannot
+    express; that warning is an error here, so a spec that would rebuild a
+    different model is never written.
+
+    Args:
+        cfg: The loaded inputs.
+        path: Where to write the spec; defaults to :data:`CONFIG_PATH`. The
+            tariff is written relative to its directory.
+
+    Returns:
+        The emitted ``FlowsheetSpec``.
+    """
+    from flexcore.config.io import dump_spec
+    from flexcore.exceptions import FlexEmitWarning
+
+    path = Path(path or CONFIG_PATH)
+    case = selected_case(cfg)
+    m = build_model(cfg, flexible=case["flexible"], battery_sizing=case["battery"])
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FlexEmitWarning)
+        spec = flexops.emit_model(m, relative_to=path.parent)
+    dump_spec(spec, path)
+    return spec
+
+
+def build_from_config(path=None):
+    """Build the model ``config.json`` describes, with ``flexops.build_model``.
+
+    Args:
+        path: A spec file; defaults to :data:`CONFIG_PATH`.
+
+    Returns:
+        The built ``pyo.ConcreteModel``, the same model :func:`build_model`
+        makes for the selected scenario.
+    """
+    return flexops.build_model(Path(path or CONFIG_PATH))
+
+
+def selected_case(cfg: dict) -> dict:
+    """Return the scenario ``scenarios.selected`` names."""
+    by_label = {case["label"]: case for case in cfg["scenarios"]["cases"]}
+    return by_label[cfg["scenarios"]["selected"]]
+
+
+def results_frame(m):
     """Return the solved schedule as a pandas DataFrame indexed by timestamp.
 
     Args:
-        m: A solved model from :func:`build_model`.
-        cfg: The config ``m`` was built from, used to re-load the tariff for the
-            energy-price column.
+        m: A solved model from :func:`build_model` or :func:`build_from_config`.
 
     Returns:
         A DataFrame with the feed/product flows, the pump on/off status, tank
@@ -431,7 +489,9 @@ def results_frame(m, cfg: dict):
         else [1] * len(ti)
     )
     data = {
-        "feed_flow_m3_per_hr": [pyo.value(m.feed_pump.flow_in[t]) for t in ti],
+        "feed_flow_m3_per_hr": [
+            pyo.value(m.feed_pump.inlet_state.flow_vol_phase[t, "Liq"]) for t in ti
+        ],
         "feed_status": status,
         "product_flow_m3_per_hr": [
             pyo.value(m.product_pump.outlet_state.flow_vol_phase[t, "Liq"]) for t in ti
@@ -456,7 +516,7 @@ def results_frame(m, cfg: dict):
     # Snap solver noise (and negative zeros) so an idle asset reads as a clean 0.
     frame = frame.mask(frame.abs() < 1e-9, 0.0)
     frame["energy_price"] = price_series(
-        load_tariff(cfg["tariff"]), tb.datetime_index
+        load_tariff(TARIFF_PATH), tb.datetime_index
     ).to_numpy()
     return frame
 
@@ -465,9 +525,9 @@ def run_scenarios(cfg: dict, cases=None) -> list[dict]:
     """Build, solve, and summarize one scenario per strategy/battery pairing.
 
     Args:
-        cfg: The loaded config.
+        cfg: The loaded inputs.
         cases: Scenario dicts with ``label``, ``flexible``, and ``battery``
-            keys; defaults to the config's ``scenarios.cases`` 2x2.
+            keys; defaults to the inputs' ``scenarios.cases`` 2x2.
 
     Returns:
         One dict per scenario with its label, strategy, battery ratings,
@@ -478,14 +538,14 @@ def run_scenarios(cfg: dict, cases=None) -> list[dict]:
         cases = cfg["scenarios"]["cases"]
 
     peak_kw = reference_load_kw(cfg)
-    peak_hours = peak_window_hours(cfg)
+    peak_hours = peak_window_hours()
     scenarios = []
     for case in cases:
         sizing = case["battery"]
         m = build_model(cfg, flexible=case["flexible"], battery_sizing=sizing)
         solve_model(m)
         report = m.costing.report_cost(m)
-        frame = results_frame(m, cfg)
+        frame = results_frame(m)
         in_peak = frame.index.hour.isin(peak_hours)
         fraction = None if sizing is None else battery_cfg["sizing_options"][sizing]
         scenarios.append(
@@ -511,17 +571,19 @@ def run_scenarios(cfg: dict, cases=None) -> list[dict]:
     return scenarios
 
 
-def peak_window_hours(cfg: dict) -> list[int]:
+def peak_window_hours() -> list[int]:
     """Return the hours covered by the tariff's demand-charge rows."""
     hours: set[int] = set()
-    for row in cfg["tariff"]["tariff_data"]:
+    for row in json.loads(TARIFF_PATH.read_text())["tariff_data"]:
         if row.get("type") == "demand":
             hours.update(range(int(row["hour_start"]), int(row["hour_end"])))
     return sorted(hours)
 
 
 if __name__ == "__main__":
-    config = load_config()
+    config = load_inputs()
+    write_config(config)
+    print(f"wrote {CONFIG_PATH.name} ({selected_case(config)['label']})")
     print(f"plant peak electrical load: {reference_load_kw(config):.2f} kW")
     print(f"inflexible constant duty:   {inflexible_flow_m3_per_hr(config):.2f} m3/hr\n")
     for scenario in run_scenarios(config):

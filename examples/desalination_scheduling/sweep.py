@@ -19,25 +19,26 @@ import model
 #: Where each point's obligation sits against `model.max_product_af()`, which is
 #: every skid at rated feed *and top recovery* for every step, never stopping.
 #:
-#: The range stops at 0.87 -- the example's own default of 265 AF -- rather than
-#: reaching for the ceiling, and that bound is about solve time, not taste.
-#: `max_product_af` is quoted at `RECOVERY_MAX`, so past roughly 0.9 the month is
-#: only feasible with recovery pinned near the top of its window everywhere at
-#: once, and the search gets very hard very quickly: 0.84 ran past ten minutes
-#: without closing, against twelve seconds for every point at or below 0.78. Those
-#: points are a corner of the feasible set rather than a schedule anyone would
-#: run, and pricing them costs hours per regeneration.
+#: The range runs to 0.95, past the example's own default of 265 AF (0.87) and
+#: into the corner where the plant is nearly out of slack. `max_product_af` is
+#: quoted at `RECOVERY_MAX`, so up there the month is only feasible with recovery
+#: pinned near the top of its window everywhere at once, and the search gets hard
+#: fast: every point at or below 0.78 closes in about twenty seconds, and every
+#: point from 0.83 up runs into :data:`TIME_LIMIT_S`.
 #:
-#: :data:`TIME_LIMIT_S` is the backstop if a point still runs long. A point that
-#: hits it is reported with its achieved gap in `summary.csv` rather than
-#: silently accepted.
-FRACTIONS = (0.50, 0.58, 0.66, 0.72, 0.78, 0.83, 0.87)
+#: That is affordable because the points are independent and
+#: `tools/sweep.py --jobs` solves them side by side, so the hard tail costs about
+#: one time limit of wall clock rather than one per point. A point that hits the
+#: limit is reported with its achieved gap and a `maxTimeLimit` termination in
+#: `summary.parquet` rather than silently accepted -- past 0.83 the schedule is
+#: feasible but not proven optimal.
+FRACTIONS = (0.50, 0.58, 0.66, 0.72, 0.78, 0.83, 0.87, 0.92, 0.95)
 
 #: The reduced sweep for CI: the two ends and the knee between them.
 SMOKE_FRACTIONS = (0.58, 0.78)
 
 #: Per-point wall-clock ceiling. The module default is 1800 s, which is a
-#: reasonable backstop for one deliberate month but turns a seven-point sweep
+#: reasonable backstop for one deliberate month but turns the sweep's hard tail
 #: into an afternoon.
 TIME_LIMIT_S = 420
 

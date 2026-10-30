@@ -1,141 +1,282 @@
 {
+  "schema_version": "0.1.0",
   "name": "pump_scheduling",
-  "description": "Two-pump water plant scheduling against a time-of-use tariff, framed as a flexibility-versus-storage trade-off. A feed pump fills a tank across a fixed pressure differential; a product pump draws from the tank to meet a fixed user demand profile. The comparison is a 2x2: an inflexible facility (feed pump held at a constant duty for all 24 hours) or a flexible one (feed pump scheduled against the tariff), each paired with a large or a small battery.",
-  "time": {
-    "start_date": "2025-07-08",
-    "end_date": "2025-07-09",
-    "time_step_hours": 1
-  },
-  "fluid": {
-    "density_kg_per_m3": 1000.0,
-    "suction_pressure_bar": 1.0
-  },
-  "feed_pump": {
-    "_comment": "Pumps into the tank. In the flexible strategy it is semicontinuous: either off, or anywhere in [min_flow_fraction, 1.0] of rated flow. In the inflexible strategy it is pinned at a single constant flow for the whole horizon (see model.inflexible_flow_m3_per_hr). delta_pressure_bar is the fixed pressure differential across the pump.",
-    "rated_flow_m3_per_hr": 250.0,
-    "min_flow_fraction": 0.6,
-    "delta_pressure_bar": 4.0,
-    "efficiency": 0.75
-  },
-  "tank": {
-    "_comment": "Sized so the flexible strategy can pre-fill and ride the whole peak window on stored water, but so the inflexible strategy -- which cannot pre-fill, because its pump never modulates -- gains nothing from it.",
-    "max_volume_m3": 1500.0,
-    "initial_volume_m3": 500.0,
-    "level_min": 0.1,
-    "level_max": 0.95,
-    "terminal_volume_m3": 500.0
-  },
-  "product_pump": {
-    "_comment": "Draws from the tank and delivers to the user/product flow. Its flow is set by product_demand_m3_per_hr, so it is an inflexible load under either strategy.",
-    "delta_pressure_bar": 2.0,
-    "efficiency": 0.7
-  },
-  "product_demand_m3_per_hr": [
-    120.0, 110.0, 100.0, 100.0, 110.0, 130.0, 175.0, 205.0,
-    225.0, 215.0, 205.0, 195.0, 190.0, 190.0, 195.0, 205.0,
-    235.0, 245.0, 235.0, 205.0, 175.0, 155.0, 145.0, 135.0
-  ],
-  "battery": {
-    "_comment": "Sizing options are fractions of the plant's peak electrical load (see reference_load_kw): power ratings are fraction * peak load, and energy capacity is fraction * peak load * storage_duration_hours.",
-    "sizing_options": {
-      "large": 1.0,
-      "small": 0.4
+  "elements": [
+    {
+      "kind": "costing",
+      "name": "costing",
+      "tariff_source": "tariff.json"
     },
-    "storage_duration_hours": 5.0,
-    "eta_charge": 0.95,
-    "eta_discharge": 0.95,
-    "soc_min": 0.1,
-    "soc_max": 0.95,
-    "initial_soc": 0.5
-  },
-  "scenarios": {
-    "_comment": "The 2x2. 'flexible' selects the feed pump strategy; 'battery' names a key of battery.sizing_options. 'selected' is the case the single-schedule charts render.",
-    "selected": "flexible + small battery",
-    "cases": [
-      {"label": "inflexible + large battery", "flexible": false, "battery": "large"},
-      {"label": "inflexible + small battery", "flexible": false, "battery": "small"},
-      {"label": "flexible + large battery", "flexible": true, "battery": "large"},
-      {"label": "flexible + small battery", "flexible": true, "battery": "small"}
-    ]
-  },
-  "tariff": {
-    "_comment": "EECO rate_data records. Peak window is 16:00-21:00 (hour_end exclusive), where energy is 4.5x the off-peak price and a monthly demand charge applies.",
-    "tariff_data": [
-      {
-        "utility": "electric",
-        "type": "customer",
-        "name": "fixed",
-        "assessed": "monthly",
-        "month_start": 1,
-        "month_end": 12,
-        "weekday_start": 0,
-        "weekday_end": 6,
-        "hour_start": 0,
-        "hour_end": 24,
-        "basic_charge_limit (metric)": 0,
-        "charge (metric)": 150.0,
-        "units": "$/month"
+    {
+      "property_class": "SimpleAqueousFlow",
+      "options": {
+        "has_pressure": true,
+        "density": {
+          "value": 1000.0,
+          "units": "kg/m^3"
+        }
       },
-      {
-        "utility": "electric",
-        "type": "demand",
-        "name": "peak_demand",
-        "assessed": "monthly",
-        "month_start": 1,
-        "month_end": 12,
-        "weekday_start": 0,
-        "weekday_end": 6,
-        "hour_start": 16,
-        "hour_end": 21,
-        "basic_charge_limit (metric)": 0,
-        "charge (metric)": 21.5,
-        "units": "$/kW"
+      "kind": "property_package",
+      "name": "properties"
+    },
+    {
+      "start_date": "2025-07-08",
+      "end_date": "2025-07-09",
+      "time_step": "1 h",
+      "kind": "time"
+    },
+    {
+      "kind": "unit",
+      "name": "battery",
+      "unit_model_class": "BatteryModel",
+      "construction_options": {
+        "capacity": {
+          "value": 112.96296296296296,
+          "units": "kWh"
+        },
+        "power_charge_max": {
+          "value": 22.59259259259259,
+          "units": "kW"
+        },
+        "power_discharge_max": {
+          "value": 22.59259259259259,
+          "units": "kW"
+        },
+        "eta_charge": 0.95,
+        "eta_discharge": 0.95,
+        "soc_min": 0.1,
+        "soc_max": 0.95,
+        "initial_soc": 0.5
       },
-      {
-        "utility": "electric",
-        "type": "energy",
-        "name": "offpeak_energy",
-        "assessed": "",
-        "month_start": 1,
-        "month_end": 12,
-        "weekday_start": 0,
-        "weekday_end": 6,
-        "hour_start": 0,
-        "hour_end": 16,
-        "basic_charge_limit (metric)": 0,
-        "charge (metric)": 0.1,
-        "units": "$/kWh"
+      "property_package": null,
+      "io_variables": [
+        {
+          "name": "power_charge",
+          "role": "input",
+          "units": "kW"
+        },
+        {
+          "name": "power_discharge",
+          "role": "input",
+          "units": "kW"
+        },
+        {
+          "name": "power_electrical",
+          "role": "output",
+          "units": "kW"
+        },
+        {
+          "name": "charge",
+          "role": "output",
+          "units": "kWh"
+        }
+      ]
+    },
+    {
+      "kind": "unit",
+      "name": "feed_pump",
+      "unit_model_class": "Pump",
+      "construction_options": {
+        "power_relation": "hydraulic",
+        "efficiency": 0.75
       },
-      {
-        "utility": "electric",
-        "type": "energy",
-        "name": "peak_energy",
-        "assessed": "",
-        "month_start": 1,
-        "month_end": 12,
-        "weekday_start": 0,
-        "weekday_end": 6,
-        "hour_start": 16,
-        "hour_end": 21,
-        "basic_charge_limit (metric)": 0,
-        "charge (metric)": 0.45,
-        "units": "$/kWh"
+      "connections": [
+        {
+          "port": "outlet",
+          "to": "tank.inlet",
+          "name": "feed_to_tank"
+        }
+      ],
+      "io_variables": [
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        },
+        {
+          "name": "power_electrical",
+          "role": "output",
+          "units": "kW"
+        },
+        {
+          "name": "pressure",
+          "role": "input",
+          "units": "Pa"
+        },
+        {
+          "name": "pressure",
+          "role": "input",
+          "units": "Pa"
+        }
+      ]
+    },
+    {
+      "kind": "unit",
+      "name": "product_pump",
+      "unit_model_class": "Pump",
+      "construction_options": {
+        "power_relation": "hydraulic",
+        "efficiency": 0.7
       },
-      {
-        "utility": "electric",
-        "type": "energy",
-        "name": "night_energy",
-        "assessed": "",
-        "month_start": 1,
-        "month_end": 12,
-        "weekday_start": 0,
-        "weekday_end": 6,
-        "hour_start": 21,
-        "hour_end": 24,
-        "basic_charge_limit (metric)": 0,
-        "charge (metric)": 0.1,
-        "units": "$/kWh"
+      "io_variables": [
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        },
+        {
+          "name": "power_electrical",
+          "role": "output",
+          "units": "kW"
+        },
+        {
+          "name": "pressure",
+          "role": "input",
+          "units": "Pa"
+        },
+        {
+          "name": "pressure",
+          "role": "input",
+          "units": "Pa"
+        }
+      ]
+    },
+    {
+      "kind": "unit",
+      "name": "tank",
+      "unit_model_class": "Tank",
+      "construction_options": {
+        "max_volume": {
+          "value": 1500.0,
+          "units": "m^3"
+        },
+        "initial_volume": {
+          "value": 500.0,
+          "units": "m^3"
+        },
+        "level_min": 0.1,
+        "level_max": 0.95
+      },
+      "costing_package": null,
+      "connections": [
+        {
+          "port": "outlet",
+          "to": "product_pump.inlet",
+          "name": "tank_to_product"
+        }
+      ],
+      "io_variables": [
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "volume",
+          "role": "output",
+          "units": "m^3"
+        }
+      ]
+    },
+    {
+      "kind": "fix",
+      "variable": "feed_pump.delta_pressure",
+      "value": 400000.0
+    },
+    {
+      "kind": "fix",
+      "variable": "feed_pump.inlet_state.flow_vol_phase[*,Liq]",
+      "value": [
+        0.0
+      ],
+      "at": [
+        0
+      ]
+    },
+    {
+      "kind": "fix",
+      "variable": "feed_pump.inlet_state.pressure",
+      "value": 100000.0
+    },
+    {
+      "kind": "fix",
+      "variable": "product_pump.delta_pressure",
+      "value": 200000.0
+    },
+    {
+      "kind": "fix",
+      "variable": "product_pump.outlet_state.flow_vol_phase[*,Liq]",
+      "value": [
+        120.0,
+        110.0,
+        100.0,
+        100.0,
+        110.0,
+        130.0,
+        175.0,
+        205.0,
+        225.0,
+        215.0,
+        205.0,
+        195.0,
+        190.0,
+        190.0,
+        195.0,
+        205.0,
+        235.0,
+        245.0,
+        235.0,
+        205.0,
+        175.0,
+        155.0,
+        145.0,
+        135.0
+      ]
+    },
+    {
+      "kind": "extension",
+      "name": "semicontinuous_flow",
+      "entry_point": "flex_pse_examples.examples.pump_scheduling.extensions:semicontinuous_flow",
+      "options": {
+        "unit": "feed_pump",
+        "min_flow": 150.0,
+        "max_flow": 250.0
       }
-    ]
-  }
+    },
+    {
+      "kind": "extension",
+      "name": "terminal_charge",
+      "entry_point": "flex_pse_examples.examples.pump_scheduling.extensions:terminal_charge",
+      "options": {
+        "battery": "battery"
+      }
+    },
+    {
+      "kind": "extension",
+      "name": "terminal_volume",
+      "entry_point": "flex_pse_examples.examples.pump_scheduling.extensions:terminal_volume",
+      "options": {
+        "tank": "tank",
+        "volume": 500.0
+      }
+    },
+    {
+      "kind": "objective"
+    }
+  ]
 }

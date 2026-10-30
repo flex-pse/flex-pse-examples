@@ -29,12 +29,12 @@ def model():
 @pytest.fixture(scope="module")
 def cfg(model):
     """The problem instance."""
-    return model.load_config()
+    return model.load_inputs()
 
 
 @pytest.fixture(scope="module")
 def scenarios(model, cfg):
-    """The config's 2x2, built and solved once for the whole module."""
+    """The inputs' 2x2, built and solved once for the whole module."""
     return model.run_scenarios(cfg)
 
 
@@ -141,3 +141,49 @@ def test_smoke_sweep_runs_and_writes_the_contract(tmp_path):
         ).fetchall()
     }
     assert in_series == set(frame["sweep_id"])
+
+
+def test_config_rebuilds_the_selected_case(model, cfg):
+    """``config.json`` builds the same model ``build_model`` makes in code.
+
+    Compared component by component -- variables with their bounds, domains
+    and fixed values, constraints, arcs and the objective -- so a spec that
+    quietly dropped a constraint or a fix fails here, not in a solve.
+    """
+    from flexops.core.compare import assert_models_equivalent
+
+    case = model.selected_case(cfg)
+    built = model.build_model(
+        cfg, flexible=case["flexible"], battery_sizing=case["battery"]
+    )
+    assert_models_equivalent(built, model.build_from_config())
+
+
+def test_config_is_current(model, cfg, tmp_path):
+    """The committed ``config.json`` is what ``write_config`` emits today.
+
+    Fails when ``model.py`` or ``inputs.json`` changed and nobody re-ran
+    ``python examples/pump_scheduling/model.py`` to rewrite the spec.
+    """
+    import json
+
+    import flexops
+    from flexcore.config.io import dump_spec
+
+    case = model.selected_case(cfg)
+    built = model.build_model(
+        cfg, flexible=case["flexible"], battery_sizing=case["battery"]
+    )
+    fresh = tmp_path / "config.json"
+    dump_spec(flexops.emit_model(built, relative_to=model.CONFIG_PATH.parent), fresh)
+    assert json.loads(fresh.read_text()) == json.loads(model.CONFIG_PATH.read_text())
+
+
+def test_config_solves_to_the_selected_cost(model, cfg, scenarios):
+    """The rebuilt model solves to the bill the code-built one does."""
+    m = model.build_from_config()
+    model.solve_model(m)
+    selected = next(s for s in scenarios if s["label"] == cfg["scenarios"]["selected"])
+    assert m.costing.report_cost(m).operating.total == pytest.approx(
+        selected["operating_cost"], rel=1e-6
+    )

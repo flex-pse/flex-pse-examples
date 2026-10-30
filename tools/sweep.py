@@ -25,7 +25,13 @@ knowable until the flowsheet is built.
 Usage::
 
     python tools/sweep.py examples/pump_scheduling
-    python tools/sweep.py examples/desalination_scheduling --smoke
+    python tools/sweep.py examples/desalination_scheduling --smoke --jobs 4
+
+Points are independent, so ``--jobs`` solves them in parallel worker processes
+with joblib. Each worker calls ``setup()`` once and reuses its context for every
+point it is handed, exactly as the serial loop does -- so an adapter whose
+context is a built model (the desalination month, retargeted per point) builds
+it once per worker, not once per point.
 
 The output layout, which :mod:`tools.site.build` validates and the WebAssembly
 notebooks read::
@@ -337,7 +343,9 @@ def _git(*args: str) -> str:
         return ""
 
 
-def build_provenance(rows: list[dict], *, smoke: bool, wall: float) -> dict[str, str]:
+def build_provenance(
+    rows: list[dict], *, smoke: bool, wall: float, jobs: int = 1, setup: float = 0.0
+) -> dict[str, str]:
     """Return the run-level facts written to ``provenance.parquet``."""
     solvers = sorted({str(r.get("solver", "")) for r in rows} - {""})
     return {
@@ -351,6 +359,9 @@ def build_provenance(rows: list[dict], *, smoke: bool, wall: float) -> dict[str,
         "solver": ", ".join(solvers),
         "n_points": str(len(rows)),
         "total_wall_seconds": f"{wall:.1f}",
+        # Summed over workers, each of which runs setup() once.
+        "setup_seconds": f"{setup:.1f}",
+        "jobs": str(jobs),
         "smoke": "yes" if smoke else "no",
         "notes": (
             "REDUCED INSTANCE -- not the published sweep"
@@ -363,8 +374,42 @@ def build_provenance(rows: list[dict], *, smoke: bool, wall: float) -> dict[str,
 # --------------------------------------------------------------------------
 # The sweep
 
+#: This process's adapter and ``setup()`` context, keyed by the run that made
+#: them. A joblib worker outlives one ``Parallel`` call -- loky keeps its pool
+#: warm -- so the key is a per-run token: a later run, even of the same example,
+#: never inherits a context an earlier one left mutated.
+_WORKER_STATE: dict = {}
 
-def run(example_dir: Path, *, smoke: bool = False, out_dir: Path | None = None) -> Path:
+
+def _solve_one(run_id: str, example_dir: Path, smoke: bool, point: dict):
+    """Solve one point, building this process's context on first use.
+
+    Module-level so joblib can ship it to a worker process. Returns the
+    adapter's ``(frame, summary)`` and the seconds spent in ``setup()`` (zero
+    after a worker's first point) and in ``solve_point()``, timed apart so
+    ``wall_seconds`` stays the solve alone.
+    """
+    setup_seconds = 0.0
+    if _WORKER_STATE.get("run_id") != run_id:
+        t0 = perf_counter()
+        adapter = load_adapter(example_dir)
+        _WORKER_STATE.clear()
+        _WORKER_STATE.update(
+            run_id=run_id, adapter=adapter, ctx=adapter.setup(smoke=smoke)
+        )
+        setup_seconds = perf_counter() - t0
+    t0 = perf_counter()
+    frame, summary = _WORKER_STATE["adapter"].solve_point(_WORKER_STATE["ctx"], point)
+    return frame, summary, setup_seconds, perf_counter() - t0
+
+
+def run(
+    example_dir: Path,
+    *,
+    smoke: bool = False,
+    out_dir: Path | None = None,
+    jobs: int = 1,
+) -> Path:
     """Solve one example across its sweep and write the site's data files.
 
     Args:
@@ -375,6 +420,12 @@ def run(example_dir: Path, *, smoke: bool = False, out_dir: Path | None = None) 
             mistaken for a publishable sweep.
         out_dir: Override the output directory. Defaults to the
             ``public/<name>/`` the WebAssembly notebook reads.
+        jobs: Worker processes to solve points in, joblib-style: ``1`` solves
+            them one after another in this process, ``-1`` uses every core.
+            Never more workers than points. Each worker pays for one
+            ``setup()``, and a solver that is itself multithreaded (Gurobi
+            takes every core by default) competes with the other workers for
+            them, so more jobs is not always faster.
 
     Returns:
         The directory written to.
@@ -383,8 +434,11 @@ def run(example_dir: Path, *, smoke: bool = False, out_dir: Path | None = None) 
         ValueError: If the adapter returns no points, or a view file exceeds
             :data:`MAX_VIEW_BYTES`.
     """
+    import uuid
+
     import duckdb
     import pandas as pd
+    from joblib import Parallel, delayed, effective_n_jobs
 
     example_dir = example_dir.resolve()
     name = example_dir.name
@@ -401,8 +455,13 @@ def run(example_dir: Path, *, smoke: bool = False, out_dir: Path | None = None) 
     if not points:
         raise ValueError(f"{name}: points() returned nothing to sweep")
 
+    jobs = min(effective_n_jobs(jobs), len(points))
     label = "reduced sweep" if smoke else "sweep"
-    print(f"{name}: {label} over {len(points)} point(s) of {axis!r}", flush=True)
+    print(
+        f"{name}: {label} over {len(points)} point(s) of {axis!r}"
+        f"{f' in {jobs} workers' if jobs > 1 else ''}",
+        flush=True,
+    )
 
     out.mkdir(parents=True, exist_ok=True)
     # One file per view holding every point, so views accumulate here rather than
@@ -410,14 +469,21 @@ def run(example_dir: Path, *, smoke: bool = False, out_dir: Path | None = None) 
     collected: dict[str, list] = {view["name"]: [] for view in views}
 
     started = perf_counter()
-    ctx = adapter.setup(smoke=smoke)
     rows: list[dict] = []
+    setup_seconds = 0.0
 
-    for i, point in enumerate(points):
+    # In point order, as each one is ready: a generator yields results in the
+    # order the points went in, so sweep ids and the progress lines line up
+    # with points() however the workers finish.
+    run_id = uuid.uuid4().hex
+    solved = Parallel(n_jobs=jobs, return_as="generator")(
+        delayed(_solve_one)(run_id, example_dir, smoke, point) for point in points
+    )
+    for i, (point, (frame, summary, setup_s, elapsed)) in enumerate(
+        zip(points, solved)
+    ):
         sweep_id = f"s{i:02d}"
-        t0 = perf_counter()
-        frame, summary = adapter.solve_point(ctx, point)
-        elapsed = perf_counter() - t0
+        setup_seconds += setup_s
 
         for view in views:
             # `sweep_id` first, and the view's own index promoted to a real
@@ -443,7 +509,9 @@ def run(example_dir: Path, *, smoke: bool = False, out_dir: Path | None = None) 
     wall = perf_counter() - started
 
     provenance = pd.DataFrame(
-        build_provenance(rows, smoke=smoke, wall=wall).items(),
+        build_provenance(
+            rows, smoke=smoke, wall=wall, jobs=jobs, setup=setup_seconds
+        ).items(),
         columns=["key", "value"],
     )
     tables = {
@@ -499,8 +567,15 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="write here instead of the example's public/<name>/",
     )
+    parser.add_argument(
+        "--jobs",
+        "-j",
+        type=int,
+        default=1,
+        help="worker processes to solve points in (-1: every core; default 1)",
+    )
     args = parser.parse_args(argv)
-    run(args.example, smoke=args.smoke, out_dir=args.out)
+    run(args.example, smoke=args.smoke, out_dir=args.out, jobs=args.jobs)
     return 0
 
 

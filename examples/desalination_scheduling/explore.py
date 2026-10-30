@@ -221,6 +221,27 @@ def _(cheapest, last_skip, mo, priciest):
 
 
 @app.cell
+def _(mo, summary):
+    # Near the ceiling a month can stop at the solver's time limit with a
+    # feasible schedule and a gap. Say which points those are rather than let
+    # them read as proven optima.
+    _open = summary[summary["termination"] != "optimal"]
+    mo.stop(_open.empty)
+    _points = ", ".join(
+        f"{row.short_label} ({row.relaxation_gap:.1%} from the lower bound)"
+        for row in _open.itertuples()
+    )
+    mo.callout(
+        mo.md(
+            f"Not proven optimal: {_points}. These stopped at the time limit "
+            "with a feasible schedule, so their cost may be a little high."
+        ),
+        kind="warn",
+    )
+    return
+
+
+@app.cell
 def _(cheapest, mo, summary):
     month = mo.ui.radio(
         options=dict(zip(summary["short_label"], summary["sweep_id"])),
