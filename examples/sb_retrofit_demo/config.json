@@ -13,8 +13,8 @@
       "name": "properties"
     },
     {
-      "start_date": "2026-07-01",
-      "end_date": "2026-08-01",
+      "start_date": "2026-07-04",
+      "end_date": "2026-07-11",
       "time_step": "0.25 h",
       "kind": "time"
     },

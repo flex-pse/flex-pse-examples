@@ -8,10 +8,10 @@ title = "Santa Barbara retrofit: before and after"
 order = 30
 
 blurb = """
-The same desalination plant delivers the same month of water, before and after a retrofit \
+The same desalination plant delivers the same week of water, before and after a retrofit \
 of extra membranes and a small battery, so watch it shed its peak load."""
 
-tags = ["MILP", "retrofit", "1 month @ 15 min", "HiGHS"]
+tags = ["MILP", "retrofit", "1 week @ 15 min", "HiGHS"]
 
 [notebooks]
 solver = "notebook.py"
@@ -25,9 +25,9 @@ execute = true
 
 [solve]
 solver = "highs"
-runtime_minutes = 20
-# A full month of case B is a relax-and-fix MILP that takes minutes. CI solves
-# a three-day horizon instead: tests/test_sb_retrofit_demo.py.
+runtime_minutes = 5
+# Case B is a relax-and-fix MILP that takes a few minutes. CI solves
+# a two-day horizon instead: tests/test_sb_retrofit_demo.py.
 ci_runnable = true
 
 [sweep]

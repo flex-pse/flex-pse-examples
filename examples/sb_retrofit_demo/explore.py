@@ -31,14 +31,14 @@ def _(mo):
         mo.md(r"""
         # Santa Barbara retrofit: before and after
 
-        One month of a seawater desalination plant, twice, delivering the same
+        One week of a seawater desalination plant, twice, delivering the same
         water. **Before**: the operators shed one of three RO skids on weekday
         peaks. **After**: +20% membrane area and a battery for the load the plant
         can never shed, with the schedule optimized.
         """),
         mo.callout(
             mo.md(
-                "These results are **precomputed**: both months were solved ahead "
+                "These results are **precomputed**: both weeks were solved ahead "
                 "of time with HiGHS, and this page replays them. For the real "
                 "model, see `notebook.py` and `model.py`."
             ),
@@ -51,12 +51,12 @@ def _(mo):
 @app.cell
 def _(DATA, duckdb, mo):
     _s = duckdb.sql(
-        f"SELECT case, bill_usd, savings_pct, peak_grid_kw_mean, load_shed_pct, water_af "
+        f"SELECT \"case\", bill_usd, savings_pct, peak_grid_kw_mean, load_shed_pct, water_af "
         f"FROM read_parquet('{DATA}/summary.parquet') ORDER BY sweep_id"
     ).df().set_index("case")
     _a, _b = _s.loc["A_before"], _s.loc["B_after"]
     mo.hstack([
-        mo.stat(f"${_b.bill_usd:,.0f}", label="Monthly bill after",
+        mo.stat(f"${_b.bill_usd:,.0f}", label="Bill for the week, after",
                 caption=f"from ${_a.bill_usd:,.0f}"),
         mo.stat(f"{_b.savings_pct:.0f}%", label="Bill savings"),
         mo.stat(f"{_b.load_shed_pct:.0f}%", label="Peak load shed"),

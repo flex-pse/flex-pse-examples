@@ -39,7 +39,7 @@ def _(mo):
     mo.md(r"""
     # Santa Barbara desalination: before and after a flexibility retrofit
 
-    The same plant delivers the same water for the month. **Before**, operators
+    The same plant delivers the same water over the same week. **Before**, operators
     shed one RO skid in weekday peak hours. **After** the retrofit (+20% membrane
     area, and a battery sized to the load the plant can never shed), the
     optimizer drops most peak windows to near-zero grid draw and lowers the bill.
@@ -76,7 +76,7 @@ def _(mo):
     mo.accordion({
         "Assumptions": mo.md(
             "| | Before | After |\n|---|---|---|\n" + "\n".join(_rows)
-            + "\n\nShared: July 2026 at 15-min steps; fixed 1,063.5 m³/h intake; "
+            + "\n\nShared: 4–11 July 2026 at 15-min steps; fixed 1,063.5 m³/h intake; "
             "45-min post-treatment restart; tariff with a 16:00–21:00 peak "
             "($0.45 vs $0.10/kWh, $21.50/kW demand charge)."
         )
@@ -110,7 +110,7 @@ def _(mo, summary):
     _a, _b = summary.loc["A_before"], summary.loc["B_after"]
     mo.hstack(
         [
-            mo.stat(f"${_b.bill_usd:,.0f}", label="Monthly bill after",
+            mo.stat(f"${_b.bill_usd:,.0f}", label="Bill for the week, after",
                     caption=f"from ${_a.bill_usd:,.0f} before", direction="decrease"),
             mo.stat(f"{_b.savings_pct:.0f}%", label="Bill savings"),
             mo.stat(f"{_b.peak_grid_kw_mean:,.0f} kW", label="Mean peak-window draw",
@@ -128,9 +128,10 @@ def _(mo, summary):
 @app.cell
 def _(frames, mo, plots):
     start = mo.ui.date(
-        value="2026-07-04", start=str(frames["A_before"].index[0].date()),
-        stop=str((frames["A_before"].index[-1] - plots.pd.Timedelta(days=7)).date()),
-        label="Window start (7 days)",
+        value=str(frames["A_before"].index[0].date()),
+        start=str(frames["A_before"].index[0].date()),
+        stop=str(frames["A_before"].index[-1].date()),
+        label="Window start",
     )
     start
     return (start,)

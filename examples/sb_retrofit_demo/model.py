@@ -1,7 +1,7 @@
-"""Santa Barbara retrofit demo: the same month, before and after a flexibility retrofit.
+"""Santa Barbara retrofit demo: the same week, before and after a flexibility retrofit.
 
-Two cases of the Santa Barbara seawater desalination plant, both a full calendar
-month at 15-minute resolution against the same tariff, both delivering the same
+Two cases of the Santa Barbara seawater desalination plant, both one week
+(Sat 4 - Sat 11 July 2026, five weekdays and a weekend) at 15-minute resolution against the same tariff, both delivering the same
 water:
 
 * **A_before** -- the operators' baselining experiment. The existing plant (30
@@ -78,8 +78,12 @@ CONFIG_PATH = HERE / "config.json"
 # Horizon and the plant both cases share
 # ---------------------------------------------------------------------------
 
-START_DATE = "2026-07-01"
-END_DATE = "2026-08-01"
+#: One week, Sat 4 - Sat 11 July 2026. A full month is the same model, but on
+#: HiGHS its relax-and-fix ladder ran past half an hour without closing; a week
+#: carries the same weekday/weekend rhythm and solves in minutes. The tariff's
+#: monthly demand charge is prorated onto the horizon by FlexCosting.
+START_DATE = "2026-07-04"
+END_DATE = "2026-07-11"
 TIME_STEP_HR = 0.25
 HORIZON_HOURS = (
     datetime.fromisoformat(END_DATE) - datetime.fromisoformat(START_DATE)
@@ -343,10 +347,10 @@ def build_case(name: str, *, demand_m3: float = 0.0, start=START_DATE, end=END_D
 
     Args:
         name: A key of :data:`CASES`.
-        demand_m3: Product water the month must deliver (m^3). Case A is
+        demand_m3: Product water the horizon must deliver (m^3). Case A is
             evaluated with 0 -- its schedule is fixed, so it makes what it makes;
             case B is handed what A delivered.
-        start, end: The horizon. Shorter than a month only for tests.
+        start, end: The horizon. Shorter only for tests.
     """
     cfg = CASES[name]
     m = pyo.ConcreteModel(name=f"sb_retrofit_{name}")
@@ -416,7 +420,7 @@ def operator_product_m3(m) -> float:
 # ---------------------------------------------------------------------------
 
 
-#: Stream the solver's log to stdout. On by default so a month-long solve
+#: Stream the solver's log to stdout. On by default so a long solve
 #: shows its gap closing; set False for quiet runs.
 TEE = True
 
@@ -471,7 +475,7 @@ def solve_case(m, *, time_limit: float | None = None):
 
 
 def report_cost(m):
-    """The month's bill: the solved dispatch evaluated by EECO (not the objective)."""
+    """The horizon's bill: the solved dispatch evaluated by EECO (not the objective)."""
     return m.costing.report_cost(m)
 
 
@@ -481,7 +485,7 @@ def report_cost(m):
 
 
 def results_frame(m):
-    """The solved month as a DataFrame indexed by timestamp."""
+    """The solved horizon as a DataFrame indexed by timestamp."""
     import pandas as pd
 
     tb = m.time_block
@@ -542,7 +546,7 @@ def results_frame(m):
 
 
 def kpis(m, frame, *, reference=None) -> dict:
-    """The month's KPIs for one case.
+    """The horizon's KPIs for one case.
 
     Args:
         m: The solved model.

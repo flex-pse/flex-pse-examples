@@ -147,7 +147,7 @@ def _frame_hero_axes(axes, index, average_rate):
         for ax in (top, bottom):
             _shade_peaks(ax, index, label=(ax is top and col == 0))
         bottom.axhline(average_rate, color=LIGHT, lw=1, ls=":", alpha=0.8)
-        bottom.annotate("monthly average", (index[-1], average_rate), xytext=(-4, 4),
+        bottom.annotate("weekly average", (index[-1], average_rate), xytext=(-4, 4),
                         textcoords="offset points", ha="right", va="bottom", color=LIGHT, fontsize=9)
         _date_ticks(bottom, index)
 
@@ -181,7 +181,8 @@ def plot_power_before_after(frames: dict[str, pd.DataFrame], *, start=WINDOW_STA
         if case == "B_after":
             ax.step(w.index, w["plant_kw"] / 1000, where="post", color=LIGHT, lw=1, ls="--",
                     alpha=0.6, label="plant load")
-            ax.legend(frameon=False, labelcolor=LIGHT, fontsize=9, loc="lower left")
+            ax.legend(frameon=False, labelcolor=LIGHT, fontsize=9, ncols=2,
+                      loc="lower right", bbox_to_anchor=(1.0, 1.0))
         ax.set_ylim(0, Y_POWER_MAX)
         _date_ticks(ax, w.index)
     fig.subplots_adjust(left=0.07, right=0.98, top=0.86, bottom=0.24)
