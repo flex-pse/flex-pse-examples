@@ -1,8 +1,9 @@
 """Marimo notebook for the Santa Barbara retrofit demo.
 
-Replays the committed, pre-solved results under ``public/sb_retrofit_demo/`` --
-it never solves, so it opens instantly (made for recording). To re-solve both
-cases, run ``python tools/sweep.py examples/sb_retrofit_demo`` (~20 min, HiGHS).
+Opens on the committed, pre-solved week under ``public/sb_retrofit_demo/`` so it
+renders instantly. **Solve both cases** re-runs the model live with HiGHS and
+streams the solver log into the cell; the charts and KPIs then switch to the
+live results. A week takes a few minutes; two or three days take seconds.
 
     marimo run examples/sb_retrofit_demo/notebook.py
 """
@@ -30,8 +31,13 @@ def _():
     import diagram
     import plots
 
-    frames, summary = plots.load_results()
-    return diagram, frames, mo, plots, summary
+    import importlib
+
+    import pandas as pd
+
+    model = importlib.import_module("flex_pse_examples.examples.sb_retrofit_demo.model")
+    stored_frames, stored_summary = plots.load_results()
+    return diagram, mo, model, pd, plots, stored_frames, stored_summary
 
 
 @app.cell
@@ -48,14 +54,9 @@ def _(mo):
 
 
 @app.cell
-def _(mo):
-    import importlib
-
-    _model_doc = importlib.import_module(
-        "flex_pse_examples.examples.sb_retrofit_demo.model"
-    )
-    _c = _model_doc.CASES
-    _kw, _kwh = _model_doc.battery_rating()
+def _(mo, model):
+    _c = model.CASES
+    _kw, _kwh = model.battery_rating()
 
     def _row(label, a, b):
         return f"| {label} | {a} | {b} |"
@@ -106,11 +107,70 @@ def _(diagram, mo, period):
 
 
 @app.cell
+def _(mo):
+    mo.md("""## Solve it""")
+    return
+
+
+@app.cell
+def _(mo, stored_frames):
+    _first = stored_frames["A_before"].index[0]
+    solve_start = mo.ui.date(value=str(_first.date()), label="Start")
+    solve_days = mo.ui.slider(2, 7, value=7, step=1, label="Days", show_value=True)
+    solve_gap = mo.ui.dropdown(
+        options={"1%": 0.01, "3%": 0.03, "5%": 0.05}, value="3%", label="MIP gap"
+    )
+    solve_button = mo.ui.run_button(label="Solve both cases")
+    mo.hstack([solve_start, solve_days, solve_gap, solve_button], justify="start", gap=2)
+    return solve_button, solve_days, solve_gap, solve_start
+
+
+@app.cell
+def _(
+    mo,
+    model,
+    pd,
+    solve_button,
+    solve_days,
+    solve_gap,
+    solve_start,
+    stored_frames,
+    stored_summary,
+):
+    if not solve_button.value:
+        frames, summary = stored_frames, stored_summary
+        mo.output.replace(
+            mo.callout(
+                mo.md("Showing the **precomputed** week. Press **Solve both cases** to "
+                      "re-run it live; the HiGHS log streams below."),
+                kind="info",
+            )
+        )
+    else:
+        _start = pd.Timestamp(solve_start.value)
+        _end = _start + pd.Timedelta(days=solve_days.value)
+        model.SOLVER_OPTIONS["highs"]["mip_rel_gap"] = solve_gap.value
+        with mo.status.spinner(title="Solving before and after with HiGHS…"):
+            _results = model.run_both(start=str(_start.date()), end=str(_end.date()))
+        frames = {k: v[1] for k, v in _results.items()}
+        summary = pd.DataFrame({k: v[2] for k, v in _results.items()}).T
+        _b = summary.loc["B_after"]
+        mo.output.replace(
+            mo.callout(
+                mo.md(f"Solved live: {solve_days.value} days from {_start:%b %d}, "
+                      f"case B in {_b.solve_seconds:,.0f} s, MIP gap {_b.mip_gap:.1%}."),
+                kind="success",
+            )
+        )
+    return frames, summary
+
+
+@app.cell
 def _(mo, summary):
     _a, _b = summary.loc["A_before"], summary.loc["B_after"]
     mo.hstack(
         [
-            mo.stat(f"${_b.bill_usd:,.0f}", label="Bill for the week, after",
+            mo.stat(f"${_b.bill_usd:,.0f}", label="Bill after",
                     caption=f"from ${_a.bill_usd:,.0f} before", direction="decrease"),
             mo.stat(f"{_b.savings_pct:.0f}%", label="Bill savings"),
             mo.stat(f"{_b.peak_grid_kw_mean:,.0f} kW", label="Mean peak-window draw",

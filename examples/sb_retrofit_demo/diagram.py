@@ -20,7 +20,7 @@ _render = importlib.import_module("flex_pse_examples.diagrams.render")
 
 TRAINS = range(3)
 BG = "#3C3C3C"
-CYAN = "#32AFCE"
+CYAN = "#1F8FB0"
 
 #: Brine runs down a lane between the RO column and the permeate header.
 BRINE_LANE = [{"x": 3.6}]

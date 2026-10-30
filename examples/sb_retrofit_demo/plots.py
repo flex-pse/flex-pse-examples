@@ -1,4 +1,4 @@
-"""Charts for the Santa Barbara retrofit demo, styled to match the pitch deck.
+"""Charts for the Santa Barbara retrofit demo, in a light theme.
 
 Pure pandas + matplotlib, reading the committed Parquet under
 ``public/sb_retrofit_demo/`` -- nothing here imports Pyomo, so the notebook can
@@ -26,11 +26,14 @@ DATA = Path(__file__).parent / "public" / "sb_retrofit_demo"
 CASES = ("A_before", "B_after")
 TITLES = {"A_before": "BEFORE RETROFIT", "B_after": "AFTER RETROFIT"}
 
-BG = "#3C3C3C"
-CYAN = "#32AFCE"
-GREY = "#8B9398"
-LIGHT = "#B0B7BB"
-GRIDLINE = "#474B4E"
+# Light theme. Text and axes are a soft charcoal; the "after" line is a deeper
+# cyan than the deck's #32AFCE so it holds contrast on a light background.
+BG = "#FBFBF8"
+CYAN = "#1F8FB0"
+GREY = "#7A8288"
+LIGHT = "#5A6166"
+GRIDLINE = "#E4E6E7"
+INK = "#3C3C3C"
 LINE = {"A_before": GREY, "B_after": CYAN}
 
 WINDOW_START = "2026-07-04"
@@ -88,7 +91,7 @@ def _shade_peaks(ax, index: pd.DatetimeIndex, label: bool = False):
     for k, day in enumerate(days):
         lo = day + pd.Timedelta(hours=PEAK_HOURS[0])
         hi = day + pd.Timedelta(hours=PEAK_HOURS[1])
-        ax.axvspan(lo, hi, color="white", alpha=0.06, lw=0, zorder=0)
+        ax.axvspan(lo, hi, color=INK, alpha=0.06, lw=0, zorder=0)
         if label and k == 0:
             ax.annotate("peak", (lo + (hi - lo) / 2, 0.97), xycoords=("data", "axes fraction"),
                         ha="center", va="top", color=GREY, fontsize=9)
@@ -147,7 +150,7 @@ def _frame_hero_axes(axes, index, average_rate):
         for ax in (top, bottom):
             _shade_peaks(ax, index, label=(ax is top and col == 0))
         bottom.axhline(average_rate, color=LIGHT, lw=1, ls=":", alpha=0.8)
-        bottom.annotate("weekly average", (index[-1], average_rate), xytext=(-4, 4),
+        bottom.annotate("average", (index[-1], average_rate), xytext=(-4, 4),
                         textcoords="offset points", ha="right", va="bottom", color=LIGHT, fontsize=9)
         _date_ticks(bottom, index)
 
@@ -179,8 +182,8 @@ def plot_power_before_after(frames: dict[str, pd.DataFrame], *, start=WINDOW_STA
         _shade_peaks(ax, w.index, label=(col == 0))
         ax.step(w.index, w["grid_kw"] / 1000, where="post", color=LINE[case], lw=2, label="grid meter")
         if case == "B_after":
-            ax.step(w.index, w["plant_kw"] / 1000, where="post", color=LIGHT, lw=1, ls="--",
-                    alpha=0.6, label="plant load")
+            ax.step(w.index, w["plant_kw"] / 1000, where="post", color=INK, lw=1, ls="--",
+                    alpha=0.7, label="plant load")
             ax.legend(frameon=False, labelcolor=LIGHT, fontsize=9, ncols=2,
                       loc="lower right", bbox_to_anchor=(1.0, 1.0))
         ax.set_ylim(0, Y_POWER_MAX)
@@ -214,7 +217,7 @@ def animate_before_after(frames: dict[str, pd.DataFrame], out: Path, *, fps: int
         if k < n_draw:
             for col in range(2):
                 for row in range(2):
-                    axes[row, col].axvline(upto, color="white", alpha=0.4, lw=1.5)
+                    axes[row, col].axvline(upto, color=INK, alpha=0.35, lw=1.5)
         return []
 
     anim = FuncAnimation(fig, frame, frames=n_total, blit=False)
