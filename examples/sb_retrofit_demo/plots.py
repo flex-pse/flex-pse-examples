@@ -4,8 +4,8 @@ Pure pandas + matplotlib, reading the committed Parquet under
 ``public/sb_retrofit_demo/`` -- nothing here imports Pyomo, so the notebook can
 draw without a solver.
 
-* :func:`plot_before_after` -- the hero figure: skids online on top, net water
-  production underneath, before on the left and after on the right.
+* :func:`plot_before_after` -- the hero figure: power consumption (MW) on top,
+  water production (m^3/h) underneath, before on the left and after on the right.
 * :func:`plot_power_before_after` -- grid power, the secondary figure that shows
   the battery and the load shed.
 * :func:`animate_before_after` -- the hero figure drawn left to right, for video.
@@ -107,7 +107,7 @@ def _date_ticks(ax, index):
 def _figure(rows: int, height: float, height_ratios=None):
     fig, axes = plt.subplots(
         rows, 2, figsize=(13.33, height), sharex="col", sharey="row", squeeze=False,
-        gridspec_kw={"height_ratios": height_ratios or [1] * rows, "hspace": 0.12, "wspace": 0.16},
+        gridspec_kw={"height_ratios": height_ratios or [1] * rows, "hspace": 0.2, "wspace": 0.16},
     )
     fig.patch.set_facecolor(BG)
     for col, case in enumerate(CASES):
@@ -126,10 +126,15 @@ def _draw_hero(axes, frames, average_rate, upto=None):
         top, bottom = axes[0, col], axes[1, col]
         color = LINE[case]
         if len(w):
-            top.step(w.index, w["trains_online"], where="post", color=color, lw=2)
-            top.fill_between(w.index, 0, w["trains_online"], step="post", color=color, alpha=0.25, lw=0)
+            top.step(w.index, w["grid_kw"] / 1000, where="post", color=color, lw=2,
+                     label="grid draw")
+            top.fill_between(w.index, 0, w["grid_kw"] / 1000, step="post", color=color,
+                             alpha=0.18, lw=0)
+            if case == "B_after":
+                top.step(w.index, w["plant_kw"] / 1000, where="post", color=INK, lw=1,
+                         ls="--", alpha=0.7, label="plant load (gap = battery)")
             bottom.step(w.index, w["product_m3_per_hr"], where="post", color=color, lw=2,
-                        label="net water production")
+                        label="water production")
             if case == "B_after" and w["offspec_permeate_m3_per_hr"].sum() > 0:
                 bottom.fill_between(
                     w.index, w["product_m3_per_hr"],
@@ -142,10 +147,9 @@ def _draw_hero(axes, frames, average_rate, upto=None):
 def _frame_hero_axes(axes, index, average_rate):
     for col, case in enumerate(CASES):
         top, bottom = axes[0, col], axes[1, col]
-        _style(top, "Skids online" if col == 0 else None)
-        _style(bottom, "Net water production (m³/h)" if col == 0 else None)
-        top.set_ylim(-0.2, 3.4)
-        top.set_yticks([0, 1, 2, 3])
+        _style(top, "Power consumption (MW)" if col == 0 else None)
+        _style(bottom, "Water production (m³/h)" if col == 0 else None)
+        top.set_ylim(0, Y_POWER_MAX)
         bottom.set_ylim(0, Y_WATER_MAX)
         for ax in (top, bottom):
             _shade_peaks(ax, index, label=(ax is top and col == 0))
@@ -157,17 +161,19 @@ def _frame_hero_axes(axes, index, average_rate):
 
 def plot_before_after(frames: dict[str, pd.DataFrame], summary: pd.DataFrame | None = None,
                       *, start=WINDOW_START, days=WINDOW_DAYS):
-    """The hero figure: skids online (top) and net water production (bottom), A | B."""
+    """The hero figure: power consumption (top) and water production (bottom), A | B."""
     windows = {c: _window(frames[c], start, days) for c in CASES}
     average_rate = frames["A_before"]["product_m3_per_hr"].mean()
-    fig, axes = _figure(2, 5.6, height_ratios=[1, 1.6])
+    fig, axes = _figure(2, 6.4, height_ratios=[1, 1])
     index = windows["A_before"].index
     _frame_hero_axes(axes, index, average_rate)
     _draw_hero(axes, windows, average_rate)
-    handles, labels = axes[1, 1].get_legend_handles_labels()
-    if handles:
-        axes[1, 1].legend(handles, labels, frameon=False, labelcolor=LIGHT, fontsize=9,
-                          loc="upper left", ncols=2)
+    for row in (0, 1):
+        handles, labels = axes[row, 1].get_legend_handles_labels()
+        if handles:
+            axes[row, 1].legend(handles, labels, frameon=False, labelcolor=LIGHT, fontsize=9,
+                                loc="lower right", bbox_to_anchor=(1.0, 0.98), ncols=2,
+                                borderaxespad=0)
     fig.subplots_adjust(left=0.07, right=0.98, top=0.9, bottom=0.16)
     return fig
 
@@ -201,7 +207,7 @@ def animate_before_after(frames: dict[str, pd.DataFrame], out: Path, *, fps: int
     windows = {c: _window(frames[c], start, days) for c in CASES}
     index = windows["A_before"].index
     average_rate = frames["A_before"]["product_m3_per_hr"].mean()
-    fig, axes = _figure(2, 5.6, height_ratios=[1, 1.6])
+    fig, axes = _figure(2, 6.4, height_ratios=[1, 1])
     fig.subplots_adjust(left=0.07, right=0.98, top=0.9, bottom=0.16)
 
     n_draw = int(fps * seconds)
@@ -234,10 +240,6 @@ def write_figures(data_dir: Path = DATA, *, video: bool = True) -> list[Path]:
     fig.savefig(data_dir / "hero.png", dpi=200, facecolor=BG)
     plt.close(fig)
     out.append(data_dir / "hero.png")
-    fig = plot_power_before_after(frames)
-    fig.savefig(data_dir / "power.png", dpi=200, facecolor=BG)
-    plt.close(fig)
-    out.append(data_dir / "power.png")
     if video:
         out.append(animate_before_after(frames, data_dir / "hero.mp4"))
     return out

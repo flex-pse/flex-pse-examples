@@ -580,7 +580,8 @@
     {
       "kind": "startup_shutdown",
       "unit": "plant.ro",
-      "min_up": 3
+      "min_up": 4,
+      "min_down": 4
     },
     {
       "kind": "status",

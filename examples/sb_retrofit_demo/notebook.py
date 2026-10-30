@@ -204,12 +204,6 @@ def _(frames, plots, start, summary):
 
 
 @app.cell
-def _(frames, plots, start):
-    plots.plot_power_before_after(frames, start=str(start.value))
-    return
-
-
-@app.cell
 def _(mo, plots):
     import duckdb
 

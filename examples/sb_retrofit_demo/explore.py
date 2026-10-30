@@ -68,10 +68,8 @@ def _(DATA, duckdb, mo):
 @app.cell
 def _(DATA, mo):
     mo.vstack([
-        mo.md("## Skids online and net water production, Jul 4–11"),
-        mo.image(src=f"{DATA}/hero.png", alt="Skids online and net water production, before vs. after"),
-        mo.md("## Grid power: the dashed line is the plant, the gap is the battery"),
-        mo.image(src=f"{DATA}/power.png", alt="Grid power before vs. after"),
+        mo.md("## Power consumption and water production, Jul 4–11"),
+        mo.image(src=f"{DATA}/hero.png", alt="Power consumption and water production, before vs. after"),
     ])
     return
 

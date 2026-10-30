@@ -96,6 +96,9 @@ PRETREATMENT_KWH_M3 = 0.01
 POST_TREATMENT_KWH_M3 = 0.11
 PRODUCT_PUMP_KWH_M3 = 0.3
 RECUP_STEPS = 3                     # 45 min post-treatment restart
+#: Minimum on and off time for an RO skid: once it starts or stops it holds
+#: that state for at least an hour (4 steps). Covers the 45-min restart too.
+MIN_DWELL_STEPS = 4
 RECOVERY_MIN, RECOVERY_MAX = 0.40, 0.50
 PEAK_START_HOUR, PEAK_END_HOUR = 16, 21
 
@@ -317,7 +320,10 @@ def construct_plant(m, *, rated_feed, min_feed, ro_intensity, recovery_fixed=Non
     for i in plant.trains:
         add_status(plant.ro[i], plant.ro[i].feed, min_feed * _M3_HR, rated_feed * _M3_HR)
         add_startup_shutdown(
-            plant.ro[i], plant.ro[i].status, min_uptime=RECUP_STEPS, min_downtime=1
+            plant.ro[i],
+            plant.ro[i].status,
+            min_uptime=max(MIN_DWELL_STEPS, RECUP_STEPS),
+            min_downtime=MIN_DWELL_STEPS,
         )
     add_status(
         plant.post_treatment,
