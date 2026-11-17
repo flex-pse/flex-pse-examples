@@ -1,0 +1,89 @@
+{
+  "name": "data_center",
+  "description": "How much shutdown does a battery avoid under a grid cap? A data center asks its utility for 50 MW. The utility can only guarantee 30 MW during its constrained hours, so the site accepts curtailment in exchange for the full 50 MW the rest of the time. A battery charged while uncapped can carry the site through the cap. All numbers are made up, and the cap is synthetic.",
+  "time": {
+    "start_date": "2025-01-01",
+    "end_date": "2026-01-01",
+    "time_step_hours": 1.0
+  },
+  "data_center": {
+    "_comment": "The site can run anywhere from 0 to full load. Output is 'compute units'; energy_intensity_kwh_per_unit = 1.0 makes one unit/hr equal 1 kW, so 50,000 units/hr is 50 MW. revenue_per_unit is $ per kWh of power drawn.",
+    "full_load_mw": 50.0,
+    "energy_intensity_kwh_per_unit": 1.0,
+    "revenue_per_unit": 1.0,
+    "compute_cost_per_mw_year": 6940000.0,
+    "compute_cost_source": "Epoch AI, 'Total cost of ownership of a one-gigawatt AI data center' (epoch.ai/data-insights/ai-datacenter-cost-breakdown), read directly. 1 GW = IT power. Annualized capital $7,607M/yr (servers+network 5-year life, facility 14-year life, land, utility works) plus non-energy operating costs $309M/yr (taxes 143 + maintenance 120 + labor 40 + water 6) = $7,916M per GW of IT power. Divided by PUE 1.14 = $6.94M per MW of power drawn at the meter. Energy ($594M/yr) is excluded because the model bills grid power separately. Assumes NVIDIA GB200 NVL72 servers; discount rate is Epoch's industry WACC (value not stated).",
+    "revenue_mix": {
+      "_comment": "R is computed from this table by model.weighted_revenue: sum(units x price) / sum(units x IT kW) per IT-kWh, divided by pue to get $ per kWh at the meter. Weights are GPUs shipped, so heavier GPUs count for more power.",
+      "pue": 1.14,
+      "gpus": [
+        {
+          "name": "H100/H200",
+          "units_millions": 4.3,
+          "price_per_gpu_hour": 2.82,
+          "it_kw_per_gpu": 1.472
+        },
+        {
+          "name": "B200",
+          "units_millions": 1.6,
+          "price_per_gpu_hour": 5.93,
+          "it_kw_per_gpu": 2.08
+        },
+        {
+          "name": "B300",
+          "units_millions": 0.94,
+          "price_per_gpu_hour": 6.71,
+          "it_kw_per_gpu": 2.258
+        }
+      ],
+      "sources": {
+        "units": "Epoch AI chip sales methodology (epoch.ai/data/ai-chip-sales-documentation/methodology): modeled cumulative shipments through October 2025. Shipments, not installed base; A100 and older GPUs are not counted.",
+        "price": "Silicon Data neocloud rental indexes, Oct 10 2026, as reported by IntuitionLabs (intuitionlabs.ai/articles/data-center-gpu-pricing-2026): H100 $2.82, B200 $5.93, B300 $6.71 per GPU-hour. Secondary source.",
+        "power": "Epoch AI chip owners methodology (epoch.ai/data/ai-chip-owners-documentation/methodology): estimated IT power per GPU 1,472 W (H100/H200), 2,080 W (B200), 2,258 W (B300)."
+      }
+    },
+    "revenue_source": "Two secondary-source estimates land at $0.92-$1.04 per kWh: (1) CoreWeave Q3 2026 revenue of $3.66B ($14.64B a year) over about 1.6 GW average active power = $9.15M per MW-year = $1.04/kWh, or $0.92 if 'active power' is IT power (divided by PUE 1.14); (2) IREN-Microsoft $9.7B five-year contract for 200 MW of IT power = $9.7M per IT MW-year = $0.97/kWh at the meter. Low case $0.85 (CoreWeave Q2 2026), high case $2.00 (IREN's newer three-year deals at over $20M per IT MW). The weighted GPU-index figure in revenue_mix ($2.08) assumes every GPU is rented 100% of the time at list price, so it is treated as the high case. Figures are from news coverage of earnings releases, not read from the filings. CoreWeave does not say whether 'active power' is IT or meter power."
+  },
+  "grid": {
+    "_comment": "Firm service is firm_mw all the time; the rest of the request (full_load_mw - firm_mw) is curtailable. curtailed_fraction is the share of the horizon during which the utility curtails the site, in events of event_hours each, spread evenly. curtailment_depth is the share of the curtailable block that is cut in an event: 1.0 cuts the site to firm_mw, 0.5 cuts half the block. Defaults lean pessimistic relative to the Duke study, which found that in about 88% of curtailment hours at least half the new load keeps running (depth 0.5 or less): 1% of the time is the top of Duke's 0.25-1% range, 3 h is Duke's average event length at 1% (2.5 h) rounded up to fit hourly steps, and depth 0.75 is deeper than Duke's typical cut. Synthetic.",
+    "firm_mw": 30.0,
+    "curtailed_fraction": 0.01,
+    "event_hours": 3.0,
+    "energy_price_per_kwh": 0.1,
+    "curtailment_depth": 0.75
+  },
+  "battery": {
+    "_comment": "Power rating is swept in MW. Cost inputs: capex, FOM and lifetime are from NREL (Cole et al. 2025); discount_rate is our own assumption.",
+    "storage_duration_hours": 4.0,
+    "eta_charge": 0.922,
+    "eta_discharge": 0.922,
+    "soc_min": 0.0,
+    "soc_max": 1.0,
+    "initial_soc": 0.5,
+    "capex_per_kwh": 334.0,
+    "fom_fraction_of_capex_per_year": 0.04,
+    "lifetime_years": 15,
+    "discount_rate": 0.07,
+    "cost_source": "NREL, Cost Projections for Utility-Scale Battery Storage: 2025 Update (Cole, Ramasamy, Turan; NREL/TP-6A40-93281). 2024 overnight capital cost of a 4-hour utility-scale Li-ion system, 2024 USD; FOM = 4% of $/kW capital cost per year (includes augmentation); 15-year life. discount_rate is not from NREL.",
+    "efficiency_source": "NREL 2025 ATB / Cole, Ramasamy, Turan (2025): 85% round-trip efficiency for utility-scale Li-ion. Split evenly across charge and discharge: sqrt(0.85) = 0.922 each."
+  },
+  "tariff": {
+    "tariff_data": [
+      {
+        "utility": "electric",
+        "type": "energy",
+        "name": "flat_energy",
+        "assessed": "",
+        "month_start": 1,
+        "month_end": 12,
+        "weekday_start": 0,
+        "weekday_end": 6,
+        "hour_start": 0,
+        "hour_end": 24,
+        "basic_charge_limit (metric)": 0,
+        "charge (metric)": 0.1,
+        "units": "$/kWh"
+      }
+    ]
+  }
+}
