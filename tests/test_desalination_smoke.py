@@ -1,30 +1,20 @@
 """The desalination example still builds and solves -- at a size CI can afford.
 
 The published example is a full calendar month at 15-minute resolution: ~27,000
-binaries, and a *non-convex MIQCP*, because `construct_plant` unfixes RO recovery
-at every step and that makes ``permeate[t] == recovery[t] * feed[t]`` bilinear. It needs Gurobi's
-spatial branch and bound; HiGHS cannot take the problem at all. There is no
-Gurobi licence on a public runner, so none of that can run in CI.
+binaries, with RO recovery free at every step as the linear window the
+``recovery_window`` extension writes. It is a MILP that HiGHS solves through
+`solve_relax_and_fix` in a minute or two -- fine for a sweep, too slow for every
+pull request.
 
-What runs here instead is a deliberately reduced instance:
-
-* **a two-day horizon** rather than a month -- 192 steps instead of 2,976, still
-  spanning the tariff's 16:00 and 21:00 boundaries and leaving room for a full
-  three-step recuperation window;
-* **recovery re-fixed** at its nominal value after the build, which linearizes
-  the split and makes the problem a plain MILP that HiGHS can solve -- through
-  the same `solve_relax_and_fix` (flex-pse's `RelaxAndFix` strategy) the month
-  uses, at a looser gap.
-
-Both are applied from outside `model.py`, by monkeypatching the module constants
-and re-fixing the variable, rather than by threading options through a
-1,400-line module whose documentation is written around the month.
+What runs here instead is the same model on **a two-day horizon** -- 192 steps
+instead of 2,976, still spanning the tariff's 16:00 and 21:00 boundaries and
+leaving room for a full three-step recuperation window -- solved through the
+same `solve_relax_and_fix` at a looser gap. The horizon is applied from outside
+`model.py`, by monkeypatching the module constants, rather than by threading
+options through a module whose documentation is written around the month.
 
 **What this does not cover**, and what therefore has no automated check at all:
 
-* the non-convex path -- free recovery, Gurobi, ``NonConvex=2``, spatial B&B;
-* ``NATIVE_OPTIONS["gurobi"]``, whose option names are only validated by a real
-  Gurobi run;
 * ``RelaxAndFix``'s fixing ladder at month scale, and its infeasibility
   branches;
 * whether the 0.2 % MIP gap really holds the recuperation window to three steps
@@ -32,7 +22,7 @@ and re-fixing the variable, rather than by threading options through a
   motivated 0.2 % over 1 %. Two days cannot reproduce it;
 * the behaviour near the demand ceiling, where the month gets genuinely hard;
 * **whether the committed sweep under `public/` still matches this model.**
-  Regenerating it needs Gurobi, so that stays a human obligation.
+  Regenerating it takes a quarter of an hour, so that stays a human obligation.
 
 A green run here means the flowsheet still builds and the scheduling logic still
 holds together. It does not mean the published month is still right.
@@ -83,19 +73,13 @@ def short_horizon(model, start=SMOKE_START, end=SMOKE_END):
 
 @pytest.fixture(scope="module")
 def solved(model):
-    """A two-day, recovery-fixed month, solved with HiGHS."""
+    """A two-day month, solved with HiGHS."""
     import pyomo.environ as pyo
 
     with short_horizon(model):
         # Comfortably inside the ceiling: near it the problem gets hard, which is
         # the example's point but not this test's.
         m = model.main(demand_af=0.6 * model.max_product_af())
-
-        # Re-fix what `construct_plant` unfixed. This is the whole reason HiGHS
-        # can take the problem: with recovery fixed, `permeate == recovery * feed`
-        # is linear and the month is a MILP rather than a non-convex MIQCP.
-        for i in m.plant.trains:
-            m.plant.ro[i].recovery.fix(model.RECOVERY)
 
         # Options matter here. Left to its defaults HiGHS chases a zero gap on a
         # unit-commitment MILP and will happily run for tens of minutes on two
@@ -176,6 +160,20 @@ def test_restart_wear_is_billed(solved, model):
     )
     expected = transitions * model.RESTART_WEAR_COST / 2
     assert report.operating.scalar == pytest.approx(expected, rel=1e-4, abs=1e-6)
+
+
+def test_recovery_stays_inside_its_window(solved, model):
+    """Whenever a skid runs, permeate / feed sits in [RECOVERY_MIN, RECOVERY_MAX].
+
+    The ``recovery_window`` extension replaces the bilinear split with two
+    linear rows; this is the check that they still describe the membrane.
+    """
+    _, frame = solved
+    for i in range(3):
+        recovery = frame[f"ro{i}_recovery"].dropna()
+        assert not recovery.empty
+        assert recovery.min() >= model.RECOVERY_MIN - 1e-6
+        assert recovery.max() <= model.RECOVERY_MAX + 1e-6
 
 
 def test_trains_run_as_a_lead_pair(solved):

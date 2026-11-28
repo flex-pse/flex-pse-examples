@@ -153,6 +153,9 @@ from flexops import (
     TimeBlock,
 )
 from flexcore.config.schema import DegradationSpec, DegradationTermSpec
+from flex_pse_examples.examples.desalination_scheduling.extensions import (
+    recovery_window,
+)
 from flexops.logic import (
     add_conditional,
     add_degradation,
@@ -256,7 +259,7 @@ _FLOW_TOL_M3_HR = 1e-6
 #: problem class; otherwise it warns and falls through its own priority list
 #: (``gurobi``, ``scip``, ``highs``, ``cbc``, ``ipopt``). HiGHS is the default
 #: because it ships with ``flex-pse[solvers]`` and needs no license.
-SOLVER = "gurobi"
+SOLVER = "highs"
 
 #: Relative MIP gap and time limit, in flex-pse's solver-neutral form:
 #: ``SolverFacade.solve`` translates them into each solver's own option name
@@ -274,51 +277,11 @@ SOLVER = "gurobi"
 MIP_GAP = 0.002
 TIME_LIMIT_S = 1800
 
-#: Native options, keyed by solver name, for what has no solver-neutral form.
-#: Looked up under the solver ``get_solver`` *returned*, not the one asked for.
-#:
-#: ``NonConvex=2`` is what an unfixed recovery costs: the split
-#: ``permeate[t] == recovery[t] * feed[t]`` is bilinear, so the month is a
-#: non-convex MIQCP and Gurobi has to run spatial branch and bound over it.
-#: Gurobi's default (``NonConvex=-1``) already does this; it is set explicitly
-#: so a run that gets slow points at its own cause. HiGHS cannot take the
-#: problem at all -- see :func:`_register_gurobi_for_quadratics`.
-NATIVE_OPTIONS = {"gurobi": {"NonConvex": 2}}
-
 #: Membrane wear per skid restart -- one stop and one start -- in the tariff's
 #: currency. Billed as a degradation penalty on each skid (see
 #: :func:`construct_plant`), half on the stop and half on the start.
 RESTART_WEAR_COST = 250.0
 
-
-def _register_gurobi_for_quadratics() -> None:
-    """Teach flex-pse's solver registry that Gurobi can take this model.
-
-    Unfixing recovery makes ``permeate[t] == recovery * feed[t]`` bilinear, and
-    flex-pse classifies *any* nonlinear constraint as ``NLP``/``MINLP`` --
-    quadratic included, since ``QP`` there means a quadratic *objective* only.
-    So the exact model is ``MINLP`` and the relaxation, whose binaries are gone,
-    is ``NLP``. The shipped ``CAPABILITIES`` lists Gurobi for ``LP``/``QP``/
-    ``MILP``, so ``get_solver`` passes over an installed Gurobi on both: with no
-    SCIP here the exact model raises outright, and the relaxation silently falls
-    through to IPOPT.
-
-    That IPOPT fallback is the worse of the two. IPOPT is a *local* solver, and
-    a relaxation that is only locally optimal is not a lower bound on the exact
-    cost -- which is the one thing :func:`main`'s ``relax_integrality`` promises.
-
-    Gurobi solves non-convex QCP and MIQCP by spatial branch and bound (what
-    ``NonConvex=2`` above asks for), so the registry entry is what is wrong here,
-    not the routing; ``CAPABILITIES`` is documented as the extension point for
-    exactly this. Idempotent, and a no-op if a future flex-pse ships the entries
-    itself.
-    """
-    from flexcore.solvers.classify import ProblemClass
-    from flexcore.solvers.registry import CAPABILITIES
-
-    CAPABILITIES.setdefault("gurobi", set()).update(
-        {ProblemClass.NLP, ProblemClass.MINLP}
-    )
 
 def main(
     relax_integrality: bool = False,
@@ -527,15 +490,11 @@ def solve_model(m, prefer: str | None = None, *, strategy=None):
     """
     from flexcore.solvers import get_solver
 
-    _register_gurobi_for_quadratics()
     solver = get_solver(model=m, prefer=prefer or SOLVER, strategy=strategy)
     results = solver.solve(
         m,
         mip_gap=MIP_GAP,
         time_limit=TIME_LIMIT_S,
-        # Keyed on what came back, not on what was asked for: these are the
-        # solver's own spellings, and a fallback would choke on another's.
-        options=dict(NATIVE_OPTIONS.get(solver.name, {})) or None,
     )
     m.solve_report = solver.last_report
 
@@ -767,30 +726,28 @@ def construct_plant(m):
         costing_package=m.costing,
     )
 
-    # Recovery is a degree of freedom, not a plant constant. flex-pse builds
-    # ``recovery[t]`` as a time-indexed Var *fixed* at the configured value and
-    # bounded by recovery_min/recovery_max, exactly so it can be unfixed in
-    # place; unfixing it here hands the optimizer the membrane window at every
-    # step, with the configured RECOVERY left behind as the starting point.
+    # Recovery is a degree of freedom, not a plant constant: each skid may run
+    # anywhere in [RECOVERY_MIN, RECOVERY_MAX] at every step. Written as
+    # flex-pse writes it -- ``permeate[t] == recovery[t] * feed[t]`` with
+    # recovery unfixed -- that is bilinear, and the month a non-convex MIQCP
+    # only a global solver can take. Because recovery is chosen per step and
+    # feed is non-negative, the same choice is exactly the linear window
+    # ``RECOVERY_MIN * feed[t] <= permeate[t] <= RECOVERY_MAX * feed[t]``, which
+    # is what the recovery_window extension writes in place of the split. The
+    # month stays a MILP, so HiGHS solves it, and the recovery a schedule ran at
+    # is read back as permeate / feed.
     #
-    # It costs the model its problem class: ``permeate[t] == recovery[t] *
-    # feed[t]`` is bilinear the moment recovery stops being a constant, so the
-    # month is a non-convex MIQCP rather than a MILP. See NATIVE_OPTIONS for
-    # what that takes. It is gentler than it sounds: a running skid's feed is
-    # pinned at rated (MIN_FEED == RATED_FEED), so each product is a bounded
-    # continuous times what is effectively a binary.
-    #
-    # And until the surrogate in the TODO above lands, the answer is known in
-    # advance: recovery pins to RECOVERY_MAX at every step and demand. With
+    # Until the surrogate in the TODO above lands, the answer is known in
+    # advance: recovery pins to RECOVERY_MAX whenever a skid runs. With
     # intensity on a per-permeate basis a m^3 of product costs the same 3.34 kWh
     # whatever the recovery, so recovery buys nothing on the *energy* side --
     # what it buys is capacity. The intake is fixed-duty, so a higher recovery
     # turns the same seawater into more permeate per skid-hour, and the month's
     # obligation is met in fewer running hours that the schedule can then place
-    # in the cheap ones. The window only starts to trade off, step by step, once
-    # intensity rises with recovery, which is what the surrogate above is for.
-    for i in plant.trains:
-        plant.ro[i].recovery.unfix()
+    # in the cheap ones. Once intensity rises with recovery the window starts to
+    # trade off step by step -- and the extension has to go, since the product
+    # it removed comes back.
+    recovery_window(m, unit="plant.ro")
 
 
     plant.post_treatment = ConstantEnergyIntensityModel(
@@ -1169,7 +1126,14 @@ def results_frame(m):
         data[f"ro{i}_permeate_m3_per_hr"] = [
             pyo.value(plant.ro[i].permeate[t]) for t in ti
         ]
-        data[f"ro{i}_recovery"] = [pyo.value(plant.ro[i].recovery[t]) for t in ti]
+        # Read back from the flows: recovery[t] itself is out of the model (see
+        # the recovery_window extension). NaN while the skid is off.
+        data[f"ro{i}_recovery"] = [
+            pyo.value(plant.ro[i].permeate[t]) / feed
+            if (feed := pyo.value(plant.ro[i].feed[t])) > _FLOW_TOL_M3_HR
+            else float("nan")
+            for t in ti
+        ]
         data[f"ro{i}_status"] = [status(i, t) for t in ti]
         data[f"ro{i}_startup"] = [startup(i, t) for t in ti]
         data[f"ro{i}_bypass_m3_per_hr"] = [

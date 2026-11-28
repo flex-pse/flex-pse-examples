@@ -629,8 +629,12 @@
       "value": 1063.5
     },
     {
-      "kind": "unfix",
-      "variable": "plant.ro[*].recovery"
+      "kind": "extension",
+      "name": "recovery_window",
+      "entry_point": "flex_pse_examples.examples.desalination_scheduling.extensions:recovery_window",
+      "options": {
+        "unit": "plant.ro"
+      }
     },
     {
       "kind": "objective"

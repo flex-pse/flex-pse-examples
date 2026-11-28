@@ -86,7 +86,7 @@ def _(EXAMPLE, mo):
         mo.md(
             f"""
     These are **precomputed** results. Each month is a big mixed-integer
-    problem (about 27,000 on/off decisions) solved with Gurobi, which doesn't
+    problem (about 27,000 on/off decisions) solved with HiGHS, which doesn't
     run in a browser. The model and a notebook that solves it live in
     [the repo]({_repo}).
     """
@@ -432,8 +432,8 @@ def _(mo, provenance, summary):
     | --- | --- |
     {_rows}
 
-    To regenerate: `python tools/sweep.py examples/desalination_scheduling`. You'll
-    need a Gurobi license, since the full month is a non-convex MIQCP.
+    To regenerate: `python tools/sweep.py examples/desalination_scheduling`. It runs on
+    HiGHS, which ships with flex-pse, and takes a minute or two a point.
     """
             ),
         }

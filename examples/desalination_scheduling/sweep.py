@@ -11,8 +11,8 @@ sit out the whole peak window.
 So the sweep is that ratio, and the page it feeds is a picture of the plant
 running out of slack. Each point is a full calendar month at 15-minute
 resolution -- ~27,000 binaries -- solved exactly through
-`model.solve_relax_and_fix` -- flex-pse's `RelaxAndFix` solve strategy -- which
-takes about ten seconds a point with Gurobi.
+`model.solve_relax_and_fix` -- flex-pse's `RelaxAndFix` solve strategy on
+HiGHS -- which takes about a minute and a half a point.
 """
 
 import model
@@ -24,15 +24,15 @@ import model
 #: into the corner where the plant is nearly out of slack. `max_product_af` is
 #: quoted at `RECOVERY_MAX`, so up there the month is only feasible with recovery
 #: pinned near the top of its window everywhere at once, and the search gets hard
-#: fast: every point at or below 0.78 closes in about twenty seconds, and every
-#: point from 0.83 up runs into :data:`TIME_LIMIT_S`.
+#: fast. With Gurobi on the old bilinear form every point from 0.83 up ran into
+#: :data:`TIME_LIMIT_S`; on the linear recovery window HiGHS closes 0.95 well
+#: inside it, but the limit stays as a backstop.
 #:
 #: That is affordable because the points are independent and
 #: `tools/sweep.py --jobs` solves them side by side, so the hard tail costs about
 #: one time limit of wall clock rather than one per point. A point that hits the
 #: limit is reported with its achieved gap and a `maxTimeLimit` termination in
-#: `summary.parquet` rather than silently accepted -- past 0.83 the schedule is
-#: feasible but not proven optimal.
+#: `summary.parquet` rather than silently accepted.
 FRACTIONS = (0.50, 0.58, 0.66, 0.72, 0.78, 0.83, 0.87, 0.92, 0.95)
 
 #: The reduced sweep for CI: the two ends and the knee between them.
