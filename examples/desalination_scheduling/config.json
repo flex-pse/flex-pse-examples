@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.1.0",
+  "schema_version": "0.2.0",
   "name": "desalination_example",
   "elements": [
     {
@@ -523,6 +523,19 @@
           "units": "m^3/h"
         }
       ]
+    },
+    {
+      "name": "restart_wear",
+      "terms": [
+        {
+          "kind": "variation",
+          "variable": "feed",
+          "price": 0.370183907365179
+        }
+      ],
+      "kind": "degradation",
+      "unit": "plant.ro",
+      "costing_package": "costing"
     },
     {
       "kind": "conditional",

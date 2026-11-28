@@ -2,7 +2,7 @@
 
 This is the one example that runs end to end on a free CI runner: 24 hourly
 steps, four to twelve small LPs and MILPs, HiGHS, a couple of seconds. It is
-therefore also the example that catches upstream drift in flexPSE, which
+therefore also the example that catches upstream drift in flex-pse, which
 ``pyproject.toml`` tracks at ``@main`` and so does not pin at all.
 
 The assertions are deliberately about the *claim* the example makes, not just
@@ -69,11 +69,46 @@ def test_a_small_battery_plus_flexibility_beats_a_large_one_without(scenarios):
 
 
 def test_every_case_moves_the_same_water(scenarios, cfg):
-    """Product delivery is the plant's fixed obligation, not a decision."""
-    demand = sum(cfg["product_demand_m3_per_hr"])
+    """Product delivery is the plant's fixed obligation, not a decision.
+
+    The ``customer`` Product holds delivery *at least* at the hourly demand;
+    pumping more costs energy, so every case delivers exactly the profile.
+    """
+    demand = cfg["product_demand_m3_per_hr"]
     for scenario in scenarios:
-        delivered = scenario["frame"]["product_flow_m3_per_hr"].sum()
+        delivered = scenario["frame"]["product_flow_m3_per_hr"].to_list()
         assert delivered == pytest.approx(demand, rel=1e-6), scenario["label"]
+
+
+def test_tank_and_battery_are_cyclic(scenarios, cfg):
+    """Neither store ends the day emptier than it started."""
+    initial = cfg["tank"]["initial_volume_m3"]
+    for scenario in scenarios:
+        assert scenario["frame"]["tank_volume_m3"].iloc[-1] >= initial - 1e-6
+        m = scenario["model"]
+        if hasattr(m, "battery"):
+            last = m.time_block.time_index.last()
+            assert m.battery.charge[last].value >= m.battery.charge_init.value - 1e-6
+
+
+def test_wear_is_billed(scenarios):
+    """The degradation penalties land in the operating cost.
+
+    Every case with a battery cycles it, and every flexible case switches its
+    feed pump, so each of those carries a positive wear bill; the operating
+    total is the energy bill plus that wear.
+    """
+    for scenario in scenarios:
+        assert scenario["wear_cost"] > 0, scenario["label"]
+        assert scenario["operating_cost"] == pytest.approx(
+            scenario["electricity_cost"] + scenario["wear_cost"], rel=1e-9
+        )
+
+
+def test_flexibility_still_wins_with_capital_counted(scenarios):
+    """With the batteries' capital added, flexible + small still beats inflexible + large."""
+    by_case = {(s["strategy"], s["sizing"]): s["total_cost"] for s in scenarios}
+    assert by_case[("flexible", "small")] < by_case[("inflexible", "large")]
 
 
 def test_tank_stays_inside_its_bounds(scenarios, cfg):

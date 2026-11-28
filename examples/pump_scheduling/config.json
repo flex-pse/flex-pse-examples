@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.1.0",
+  "schema_version": "0.2.0",
   "name": "pump_scheduling",
   "elements": [
     {
@@ -30,7 +30,7 @@
       "name": "battery",
       "unit_model_class": "BatteryModel",
       "construction_options": {
-        "capacity": {
+        "energy_capacity": {
           "value": 112.96296296296296,
           "units": "kWh"
         },
@@ -46,7 +46,8 @@
         "eta_discharge": 0.95,
         "soc_min": 0.1,
         "soc_max": 0.95,
-        "initial_soc": 0.5
+        "initial_soc": 0.5,
+        "cyclic": true
       },
       "property_package": null,
       "io_variables": [
@@ -69,6 +70,125 @@
           "name": "charge",
           "role": "output",
           "units": "kWh"
+        }
+      ]
+    },
+    {
+      "kind": "unit",
+      "name": "customer",
+      "unit_model_class": "Product",
+      "construction_options": {
+        "resource_name": "product_water",
+        "min_demand": [
+          {
+            "value": 120.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 110.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 100.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 100.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 110.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 130.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 175.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 205.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 225.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 215.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 205.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 195.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 190.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 190.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 195.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 205.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 235.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 245.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 235.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 205.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 175.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 155.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 145.0,
+            "units": "m^3/h"
+          },
+          {
+            "value": 135.0,
+            "units": "m^3/h"
+          }
+        ]
+      },
+      "costing_package": null,
+      "io_variables": [
+        {
+          "name": "flow_vol_phase",
+          "role": "input",
+          "units": "m^3/h"
+        },
+        {
+          "name": "pressure",
+          "role": "output",
+          "units": "Pa"
         }
       ]
     },
@@ -123,6 +243,13 @@
         "power_relation": "hydraulic",
         "efficiency": 0.7
       },
+      "connections": [
+        {
+          "port": "outlet",
+          "to": "customer.inlet_a",
+          "name": "product_to_customer"
+        }
+      ],
       "io_variables": [
         {
           "name": "flow_vol_phase",
@@ -164,6 +291,7 @@
           "value": 500.0,
           "units": "m^3"
         },
+        "cyclic": true,
         "level_min": 0.1,
         "level_max": 0.95
       },
@@ -194,24 +322,50 @@
       ]
     },
     {
-      "kind": "fix",
-      "variable": "feed_pump.delta_pressure",
-      "value": 400000.0
-    },
-    {
-      "kind": "fix",
-      "variable": "feed_pump.inlet_state.flow_vol_phase[*,Liq]",
-      "value": [
-        0.0
+      "kind": "unit",
+      "name": "water_source",
+      "unit_model_class": "Feed",
+      "construction_options": {
+        "resource_name": "raw_water"
+      },
+      "costing_package": null,
+      "connections": [
+        {
+          "port": "outlet_a",
+          "to": "feed_pump.inlet",
+          "name": "source_to_feed"
+        }
       ],
-      "at": [
-        0
+      "io_variables": [
+        {
+          "name": "flow_vol_phase",
+          "role": "output",
+          "units": "m^3/h"
+        },
+        {
+          "name": "pressure",
+          "role": "input",
+          "units": "Pa"
+        }
       ]
     },
     {
+      "name": "cycling_wear",
+      "terms": [
+        {
+          "kind": "throughput",
+          "variable": "power_discharge",
+          "price": 0.03
+        }
+      ],
+      "kind": "degradation",
+      "unit": "battery",
+      "costing_package": "costing"
+    },
+    {
       "kind": "fix",
-      "variable": "feed_pump.inlet_state.pressure",
-      "value": 100000.0
+      "variable": "feed_pump.delta_pressure",
+      "value": 400000.0
     },
     {
       "kind": "fix",
@@ -220,33 +374,8 @@
     },
     {
       "kind": "fix",
-      "variable": "product_pump.outlet_state.flow_vol_phase[*,Liq]",
-      "value": [
-        120.0,
-        110.0,
-        100.0,
-        100.0,
-        110.0,
-        130.0,
-        175.0,
-        205.0,
-        225.0,
-        215.0,
-        205.0,
-        195.0,
-        190.0,
-        190.0,
-        195.0,
-        205.0,
-        235.0,
-        245.0,
-        235.0,
-        205.0,
-        175.0,
-        155.0,
-        145.0,
-        135.0
-      ]
+      "variable": "water_source.outlet_a_state.pressure",
+      "value": 100000.0
     },
     {
       "kind": "extension",
@@ -255,24 +384,8 @@
       "options": {
         "unit": "feed_pump",
         "min_flow": 150.0,
-        "max_flow": 250.0
-      }
-    },
-    {
-      "kind": "extension",
-      "name": "terminal_charge",
-      "entry_point": "flex_pse_examples.examples.pump_scheduling.extensions:terminal_charge",
-      "options": {
-        "battery": "battery"
-      }
-    },
-    {
-      "kind": "extension",
-      "name": "terminal_volume",
-      "entry_point": "flex_pse_examples.examples.pump_scheduling.extensions:terminal_volume",
-      "options": {
-        "tank": "tank",
-        "volume": 500.0
+        "max_flow": 250.0,
+        "start_stop_cost": 2.0
       }
     },
     {

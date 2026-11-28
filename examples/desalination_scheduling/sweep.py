@@ -11,7 +11,8 @@ sit out the whole peak window.
 So the sweep is that ratio, and the page it feeds is a picture of the plant
 running out of slack. Each point is a full calendar month at 15-minute
 resolution -- ~27,000 binaries -- solved exactly through
-`model.solve_relax_and_fix`, which takes about ten seconds a point with Gurobi.
+`model.solve_relax_and_fix` -- flex-pse's `RelaxAndFix` solve strategy -- which
+takes about ten seconds a point with Gurobi.
 """
 
 import model
@@ -68,10 +69,7 @@ def setup(*, smoke: bool = False):
     # A sweep is many months, not one, so the module's 1800 s backstop is far too
     # generous. Narrow it here rather than in `model.py`, where it is the right
     # value for someone solving a single month on purpose.
-    for options in model.SOLVER_OPTIONS.values():
-        for key in ("TimeLimit", "time_limit"):
-            if key in options:
-                options[key] = TIME_LIMIT_S
+    model.TIME_LIMIT_S = TIME_LIMIT_S
 
     return model.main(demand_af=points(smoke=smoke)[0]["demand_af"])
 
@@ -111,6 +109,7 @@ def solve_point(m, point: dict):
         "objective": float(m.objective()),
         "operating_cost": float(report.operating.total),
         "electricity_cost": float(report.operating.electricity),
+        "wear_cost": float(report.operating.scalar),
         "peak_kw": float(frame["grid_kw"].max()),
         "restarts": restarts,
         "offspec_af": offspec_af,
@@ -120,7 +119,8 @@ def solve_point(m, point: dict):
             ].sum()
             * step_hours
         ),
-        "solver": model.SOLVER,
+        # The solver that produced the schedule, not the one asked for.
+        "solver": m.solve_report.steps[-1].solver,
         # Report what the solver actually said. Points near the top of the range
         # hit TIME_LIMIT_S and come back `maxTimeLimit` with a feasible schedule
         # and a non-zero gap -- which is a fine thing to publish, and a terrible

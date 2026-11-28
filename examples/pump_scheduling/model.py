@@ -31,16 +31,35 @@ the cost difference is purely a matter of *when* that energy is bought. A pump
 pinned at rated flow for 24 hours would instead over-pump the tank by a third
 of a day's demand, and the comparison would be dominated by spilled water.
 
-The problem instance -- sizing, demand profile, battery options, the 2x2 -- is
-in ``inputs.json``, and the tariff is in ``tariff.json``. :func:`build_model`
-wires a model from them in code and is the only place input keys are read.
-``config.json`` is not hand-written: it is the flex-pse spec
-:func:`write_config` emits from the selected scenario's model with
+The plant's boundary is two flex-pse blocks. Raw water comes in through a
+**Feed** (``water_source``), which carries the suction pressure as its boundary
+condition and meters the withdrawal. Delivered water leaves through a
+**Product** (``customer``), whose per-period ``min_demand`` is the hourly demand
+profile -- a length-24 series, so the obligation is a limit the plant can be
+held to rather than a fix written onto some pump's state.
+
+The tank and the battery are both **cyclic** (``cyclic=True``): each has to end
+the day at least as full as it started, so neither strategy can sell off stored
+water or energy it never has to buy back.
+
+Operating cost is more than the energy bill. Two **degradation penalties**
+(:func:`flexops.logic.add_degradation`) price wear: every on/off transition of
+the flexible feed pump, and every kWh the battery discharges. Both are billed
+through ``FlexCosting`` as scalar operating costs, so the optimizer weighs a
+start, or a cycle, against the energy it saves. The battery's **capital cost**
+is annualized with :func:`flexops.costing.capital_recovery_factor` and reported
+per day beside the operating cost (:func:`battery_capital_cost_per_day`); it is
+reporting only, since the battery is not sized here.
+
+The problem instance -- sizing, demand profile, battery options, wear and
+capital costs, the 2x2 -- is in ``inputs.json``, and the tariff is in
+``tariff.json``. :func:`build_model` wires a model from them in code and is the
+only place input keys are read. ``config.json`` is not hand-written: it is the
+flex-pse spec :func:`write_config` emits from the selected scenario's model with
 ``flexops.emit_model``, and ``flexops.build_model`` turns it back into that same
-model (:func:`build_from_config`). Everything without a spec element of its own
--- the feed pump's semicontinuous band and the two terminal conditions -- is an
-``@flexops.extension`` in ``extensions.py``, so the spec names it instead of
-dropping it.
+model (:func:`build_from_config`). The one piece without a spec element of its
+own -- the feed pump's semicontinuous band -- is an ``@flexops.extension`` in
+``extensions.py``, so the spec names it instead of dropping it.
 
 Two modeling choices are worth calling out, because both were forced by how the
 library composes and neither is obvious:
@@ -52,8 +71,8 @@ library composes and neither is obvious:
   so leaving it free makes ``power_eq`` a product of two free Vars — the model
   classifies as MINLP and HiGHS refuses it. Fixing ``delta_pressure`` directly
   is both the literal physical spec and what keeps the power law linear in flow.
-  Suction pressure is fixed once at the plant inlet; every downstream pressure
-  then follows from ``pressure_change`` and the arcs.
+  Suction pressure is fixed once, on the raw-water ``Feed``; every downstream
+  pressure then follows from ``pressure_change`` and the arcs.
 
 * **Density is a property-package constant, not a boundary condition.**
   ``SimpleAqueousFlow`` takes ``density=`` and builds ``dens_mass_phase`` as an
@@ -62,12 +81,6 @@ library composes and neither is obvious:
   writes no density equality across the arcs, and the model's degrees of freedom
   come out as the 24 hourly feed-flow decisions with no over-constrained set.
 
-  This replaced an earlier ``fixed_density`` flag in flexPSE ``1112c776``
-  (2026-08-11). Under the old flag, ``fixed_density=True`` *did* put ``dens_mass``
-  in the state vars, so each of two arcs contributed 24 equalities over zero free
-  variables — a structural singularity that read as DoF == -24 — and this example
-  passed ``fixed_density=False`` and fixed density once at the plant suction to
-  dodge it. Nothing needs to dodge it now.
 """
 
 import json
@@ -79,15 +92,23 @@ from pyomo.environ import units as pyunits
 from pyomo.network import Arc
 
 import flexops
-from flexops import BatteryModel, FlexCosting, Pump, SimpleAqueousFlow, Tank, TimeBlock
-
-# By package path, not as a sibling module: the extension elements in
-# config.json name these functions by where they were imported from.
-from flex_pse_examples.examples.pump_scheduling.extensions import (
-    semicontinuous_flow,
-    terminal_charge,
-    terminal_volume,
+from flexcore.config.schema import DegradationSpec, DegradationTermSpec
+from flexops import (
+    BatteryModel,
+    Feed,
+    FlexCosting,
+    Product,
+    Pump,
+    SimpleAqueousFlow,
+    Tank,
+    TimeBlock,
 )
+from flexops.costing import capital_recovery_factor
+from flexops.logic import add_degradation
+
+# By package path, not as a sibling module: the extension element in
+# config.json names this function by where it was imported from.
+from flex_pse_examples.examples.pump_scheduling.extensions import semicontinuous_flow
 
 HERE = Path(__file__).parent
 INPUTS_PATH = HERE / "inputs.json"
@@ -97,6 +118,7 @@ TARIFF_PATH = HERE / "tariff.json"
 CONFIG_PATH = HERE / "config.json"
 
 _BAR = 1e5 * pyunits.Pa
+_M3_HR = pyunits.m**3 / pyunits.hr
 
 
 def load_inputs(path=None) -> dict:
@@ -225,14 +247,12 @@ def inflexible_flow_m3_per_hr(cfg: dict) -> float:
 
     The inflexible facility runs its feed pump at a 100% duty cycle, so its one
     degree of freedom — the flow it settles at — is fixed by the horizon's water
-    balance: it must deliver the demand profile plus whatever net change the
-    terminal tank target asks for.
+    balance. The tank is cyclic (it must end at least as full as it started), so
+    the pump has to replace every m^3 the customer draws: the mean demand.
 
-    ``Tank``'s holdup equation is a backward difference defined on ``t = 1..n-1``
-    (``volume[0]`` is pinned to ``initial_volume`` as the rolling-horizon initial
-    state), so the balance closes over ``n - 1`` intervals and the demand at
-    ``t = 0`` never enters it. The flat duty has to be derived against that same
-    convention or the pinned schedule is infeasible by construction.
+    ``Tank``'s holdup balance covers every step, ``t = 0`` included (the
+    initial volume is the level *before* step 0's flows), so the balance closes
+    over all ``n`` intervals and the whole demand profile counts.
 
     Args:
         cfg: The loaded inputs.
@@ -240,11 +260,41 @@ def inflexible_flow_m3_per_hr(cfg: dict) -> float:
     Returns:
         The constant feed flow, in m^3/hr.
     """
-    tank = cfg["tank"]
     demand = cfg["product_demand_m3_per_hr"]
-    net_fill = tank["terminal_volume_m3"] - tank["initial_volume_m3"]
-    intervals = (len(demand) - 1) * cfg["time"]["time_step_hours"]
-    return (sum(demand[1:]) + net_fill) / intervals
+    return sum(demand) / len(demand)
+
+
+def battery_ratings(cfg: dict, fraction: float) -> tuple[float, float]:
+    """Return ``(power_kw, energy_kwh)`` for a battery sized at ``fraction``.
+
+    Both are quoted against :func:`reference_load_kw`: the power rating is
+    ``fraction`` of the plant's peak load, and the energy is that rating held
+    for ``storage_duration_hours``.
+    """
+    rate_kw = fraction * reference_load_kw(cfg)
+    return rate_kw, rate_kw * cfg["battery"]["storage_duration_hours"]
+
+
+def battery_capital_cost_per_day(cfg: dict, energy_kwh: float | None) -> float:
+    """Return a battery's installed cost annualized and spread over one day.
+
+    ``capital_cost_per_kwh * energy_kwh``, times the capital recovery factor
+    ``flexops.costing.capital_recovery_factor(discount_rate, lifetime_years)``,
+    divided by 365. This is what makes "a bigger battery" and "flexible pumps"
+    comparable on one bill: flexibility costs nothing to build, a battery does.
+
+    Args:
+        cfg: The loaded inputs.
+        energy_kwh: The battery's energy capacity, or ``None`` for no battery.
+
+    Returns:
+        The capital cost per day, in the tariff's currency.
+    """
+    if not energy_kwh:
+        return 0.0
+    battery = cfg["battery"]
+    crf = capital_recovery_factor(battery["discount_rate"], battery["lifetime_years"])
+    return battery["capital_cost_per_kwh"] * energy_kwh * crf / 365.0
 
 
 def build_model(cfg: dict, *, flexible: bool = True, battery_sizing: str | None = None):
@@ -291,18 +341,29 @@ def build_model(cfg: dict, *, flexible: bool = True, battery_sizing: str | None 
     # tariff object.
     m.costing = FlexCosting(time_block=tb, tariff_file=str(TARIFF_PATH))
 
+    # The plant boundary. The Feed carries the raw water's boundary state --
+    # suction pressure, fixed below -- and meters the withdrawal; the Product
+    # meters the delivery and holds it to the hourly demand profile. A
+    # period-basis min_demand given as a series sets one limit per step.
+    m.water_source = Feed(
+        property_package=m.properties,
+        resource_name="raw_water",
+    )
     m.feed_pump = Pump(
         property_package=m.properties,
         power_relation="hydraulic",
         efficiency=feed["efficiency"],
         costing_package=m.costing,
     )
+    # cyclic: end the day at least as full as it started. Without it the
+    # schedule just drains the tank and under-pumps.
     m.tank = Tank(
         property_package=m.properties,
         max_volume=tank_cfg["max_volume_m3"] * pyunits.m**3,
         initial_volume=tank_cfg["initial_volume_m3"] * pyunits.m**3,
         level_min=tank_cfg["level_min"],
         level_max=tank_cfg["level_max"],
+        cyclic=True,
     )
     m.product_pump = Pump(
         property_package=m.properties,
@@ -310,9 +371,20 @@ def build_model(cfg: dict, *, flexible: bool = True, battery_sizing: str | None 
         efficiency=product["efficiency"],
         costing_package=m.costing,
     )
+    m.customer = Product(
+        property_package=m.properties,
+        resource_name="product_water",
+        min_demand=[value * _M3_HR for value in demand],
+    )
 
+    m.source_to_feed = Arc(
+        source=m.water_source.outlet_a, destination=m.feed_pump.inlet
+    )
     m.feed_to_tank = Arc(source=m.feed_pump.outlet, destination=m.tank.inlet)
     m.tank_to_product = Arc(source=m.tank.outlet, destination=m.product_pump.inlet)
+    m.product_to_customer = Arc(
+        source=m.product_pump.outlet, destination=m.customer.inlet_a
+    )
     pyo.TransformationFactory("network.expand_arcs").apply_to(m)
 
     for t in tb.time_index:
@@ -324,41 +396,34 @@ def build_model(cfg: dict, *, flexible: bool = True, battery_sizing: str | None 
         m.product_pump.delta_pressure[t].fix(
             pyo.value(product["delta_pressure_bar"] * _BAR)
         )
-        # Plant boundary condition: suction pressure enters once, at the feed
-        # pump inlet, and propagates downstream through the arcs. Density is not
-        # a boundary condition -- it is set on the property package above.
-        m.feed_pump.inlet_state.pressure[t].fix(
+        # The plant's one boundary condition: suction pressure, on the Feed's
+        # reference outlet. It propagates downstream through the arcs.
+        m.water_source.outlet_a_state.pressure[t].fix(
             pyo.value(fluid["suction_pressure_bar"] * _BAR)
         )
-        # The user/product delivery is the plant's fixed obligation.
-        m.product_pump.outlet_state.flow_vol_phase[t, "Liq"].fix(demand[t])
 
     # Fixed on the [t, phase] state itself rather than through a Reference:
     # a spec's fix elements are applied before its extensions run, so they
     # have to name a variable the pump builds on its own.
     feed_flow = m.feed_pump.inlet_state.flow_vol_phase
     if flexible:
-        # Off, or anywhere in [min_flow_fraction, 1.0] x rated flow.
+        # Off, or anywhere in [min_flow_fraction, 1.0] x rated flow, and every
+        # start or stop is billed as wear (see extensions.py).
         rated = feed["rated_flow_m3_per_hr"]
         semicontinuous_flow(
             m,
             unit="feed_pump",
             min_flow=feed["min_flow_fraction"] * rated,
             max_flow=rated,
+            start_stop_cost=feed["start_stop_cost"],
         )
     else:
-        # 100% duty cycle: one constant flow, held over every interval. No
-        # status binary, so the feed pump contributes no degrees of freedom.
+        # 100% duty cycle: one constant flow, held over every step. No status
+        # binary, so the feed pump contributes no degrees of freedom -- and
+        # never switches, so it carries no start/stop wear.
         flat = inflexible_flow_m3_per_hr(cfg)
-        for t in list(tb.time_index)[1:]:
+        for t in tb.time_index:
             feed_flow[t, "Liq"].fix(flat)
-
-    # t=0 is the rolling-horizon initial-state snapshot: Tank pins volume[0] to
-    # initial_volume, so the holdup equation never sees the feed flow there and
-    # any water pumped at t=0 simply vanishes. Left free it is a phantom the
-    # flexible strategy zeroes out and the inflexible one pays for, which would
-    # charge one strategy for a modeling artifact rather than for its schedule.
-    feed_flow[0, "Liq"].fix(0.0)
 
     if battery_sizing is not None:
         battery_cfg = cfg["battery"]
@@ -368,11 +433,11 @@ def build_model(cfg: dict, *, flexible: bool = True, battery_sizing: str | None 
                 f"Unknown battery sizing {battery_sizing!r}; expected one of "
                 f"{sorted(options)} or None."
             )
-        fraction = options[battery_sizing]
-        peak_kw = reference_load_kw(cfg)
-        rate_kw = fraction * peak_kw
+        rate_kw, energy_kwh = battery_ratings(cfg, options[battery_sizing])
+        # cyclic: end the day at least as charged as it started, so the
+        # schedule cannot sell off stored energy it never has to buy back.
         m.battery = BatteryModel(
-            capacity=rate_kw * battery_cfg["storage_duration_hours"] * pyunits.kWh,
+            energy_capacity=energy_kwh * pyunits.kWh,
             power_charge_max=rate_kw * pyunits.kW,
             power_discharge_max=rate_kw * pyunits.kW,
             eta_charge=battery_cfg["eta_charge"],
@@ -380,11 +445,25 @@ def build_model(cfg: dict, *, flexible: bool = True, battery_sizing: str | None 
             soc_min=battery_cfg["soc_min"],
             soc_max=battery_cfg["soc_max"],
             initial_soc=battery_cfg["initial_soc"],
+            cyclic=True,
             costing_package=m.costing,
         )
-        terminal_charge(m, battery="battery")
-
-    terminal_volume(m, tank="tank", volume=tank_cfg["terminal_volume_m3"])
+        # Wear: a throughput penalty on every kWh discharged, so cycling the
+        # battery is no longer free.
+        add_degradation(
+            m.battery,
+            DegradationSpec(
+                name="cycling_wear",
+                terms=[
+                    DegradationTermSpec(
+                        kind="throughput",
+                        variable="power_discharge",
+                        price=battery_cfg["wear_cost_per_kwh"],
+                    )
+                ],
+            ),
+            costing=m.costing,
+        )
 
     m.costing.cost_process()
     m.objective = pyo.Objective(
@@ -413,6 +492,11 @@ def solve_model(m, *, prefer: str = "highs"):
 
     results = get_solver(model=m, prefer=prefer).solve(m)
     assert_optimal_termination(results)
+    # A solver returns an idle grid connection as a few nanowatts either side
+    # of zero, and EECO warns on any negative draw it is asked to bill.
+    for entry in m.costing.aggregate_power.values():
+        if entry.value is not None and abs(entry.value) < 1e-6:
+            entry.set_value(0.0, skip_validation=True)
     return results
 
 
@@ -494,7 +578,7 @@ def results_frame(m):
         ],
         "feed_status": status,
         "product_flow_m3_per_hr": [
-            pyo.value(m.product_pump.outlet_state.flow_vol_phase[t, "Liq"]) for t in ti
+            pyo.value(m.customer.delivery[t]) for t in ti
         ],
         "tank_volume_m3": [pyo.value(m.tank.volume[t]) for t in ti],
         "tank_level": [pyo.value(m.tank.level[t]) for t in ti],
@@ -533,35 +617,31 @@ def run_scenarios(cfg: dict, cases=None) -> list[dict]:
         One dict per scenario with its label, strategy, battery ratings,
         reported cost breakdown, peak-window grid draw, and the solved model.
     """
-    battery_cfg = cfg["battery"]
     if cases is None:
         cases = cfg["scenarios"]["cases"]
 
-    peak_kw = reference_load_kw(cfg)
     peak_hours = peak_window_hours()
     scenarios = []
     for case in cases:
         sizing = case["battery"]
         m = build_model(cfg, flexible=case["flexible"], battery_sizing=sizing)
         solve_model(m)
-        report = m.costing.report_cost(m)
         frame = results_frame(m)
         in_peak = frame.index.hour.isin(peak_hours)
-        fraction = None if sizing is None else battery_cfg["sizing_options"][sizing]
+        battery_kw = battery_kwh = None
+        if sizing is not None:
+            battery_kw, battery_kwh = battery_ratings(
+                cfg, cfg["battery"]["sizing_options"][sizing]
+            )
         scenarios.append(
             {
                 "label": case["label"],
                 "flexible": case["flexible"],
                 "strategy": "flexible" if case["flexible"] else "inflexible",
                 "sizing": sizing,
-                "battery_kw": None if fraction is None else fraction * peak_kw,
-                "battery_kwh": (
-                    None
-                    if fraction is None
-                    else fraction * peak_kw * battery_cfg["storage_duration_hours"]
-                ),
-                "operating_cost": report.operating.total,
-                "electricity_cost": report.operating.electricity,
+                "battery_kw": battery_kw,
+                "battery_kwh": battery_kwh,
+                **cost_summary(cfg, m, battery_kwh),
                 "peak_window_grid_kw": float(frame.loc[in_peak, "grid_kw"].max()),
                 "peak_window_grid_kwh": float(frame.loc[in_peak, "grid_kw"].sum()),
                 "model": m,
@@ -569,6 +649,32 @@ def run_scenarios(cfg: dict, cases=None) -> list[dict]:
             }
         )
     return scenarios
+
+
+def cost_summary(cfg: dict, m, battery_kwh: float | None) -> dict:
+    """Return one solved day's costs, split the way the example reports them.
+
+    Args:
+        cfg: The loaded inputs.
+        m: A solved model.
+        battery_kwh: The battery's energy capacity, or ``None``.
+
+    Returns:
+        ``operating_cost`` (the reported operating total: energy plus wear),
+        ``electricity_cost`` (the EECO bill), ``wear_cost`` (the degradation
+        penalties, billed as scalar operating costs),
+        ``battery_capital_cost`` (the battery's annualized capital, per day)
+        and ``total_cost`` (operating plus capital).
+    """
+    report = m.costing.report_cost(m)
+    capital = battery_capital_cost_per_day(cfg, battery_kwh)
+    return {
+        "operating_cost": float(report.operating.total),
+        "electricity_cost": float(report.operating.electricity),
+        "wear_cost": float(report.operating.scalar),
+        "battery_capital_cost": capital,
+        "total_cost": float(report.operating.total) + capital,
+    }
 
 
 def peak_window_hours() -> list[int]:
@@ -595,5 +701,7 @@ if __name__ == "__main__":
         print(
             f"{scenario['label']:>27}  battery={rating:>22}  "
             f"operating=${scenario['operating_cost']:8.2f}  "
+            f"(wear ${scenario['wear_cost']:5.2f})  "
+            f"+capital=${scenario['total_cost']:8.2f}  "
             f"peak-window draw={scenario['peak_window_grid_kw']:6.2f} kW"
         )

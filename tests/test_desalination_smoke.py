@@ -2,7 +2,7 @@
 
 The published example is a full calendar month at 15-minute resolution: ~27,000
 binaries, and a *non-convex MIQCP*, because `construct_plant` unfixes RO recovery
-and that makes ``permeate[t] == recovery * feed[t]`` bilinear. It needs Gurobi's
+at every step and that makes ``permeate[t] == recovery[t] * feed[t]`` bilinear. It needs Gurobi's
 spatial branch and bound; HiGHS cannot take the problem at all. There is no
 Gurobi licence on a public runner, so none of that can run in CI.
 
@@ -12,7 +12,9 @@ What runs here instead is a deliberately reduced instance:
   spanning the tariff's 16:00 and 21:00 boundaries and leaving room for a full
   three-step recuperation window;
 * **recovery re-fixed** at its nominal value after the build, which linearizes
-  the split and makes the problem a plain MILP that HiGHS can solve.
+  the split and makes the problem a plain MILP that HiGHS can solve -- through
+  the same `solve_relax_and_fix` (flex-pse's `RelaxAndFix` strategy) the month
+  uses, at a looser gap.
 
 Both are applied from outside `model.py`, by monkeypatching the module constants
 and re-fixing the variable, rather than by threading options through a
@@ -21,12 +23,12 @@ and re-fixing the variable, rather than by threading options through a
 **What this does not cover**, and what therefore has no automated check at all:
 
 * the non-convex path -- free recovery, Gurobi, ``NonConvex=2``, spatial B&B;
-* ``SOLVER_OPTIONS["gurobi"]``, whose option names are only validated by a real
+* ``NATIVE_OPTIONS["gurobi"]``, whose option names are only validated by a real
   Gurobi run;
-* ``solve_relax_and_fix``'s fixing ladder at month scale, and its infeasibility
+* ``RelaxAndFix``'s fixing ladder at month scale, and its infeasibility
   branches;
 * whether the 0.2 % MIP gap really holds the recuperation window to three steps
-  *over a whole month* -- the exact failure the ``SOLVER_OPTIONS`` docstring says
+  *over a whole month* -- the exact failure the ``MIP_GAP`` comment says
   motivated 0.2 % over 1 %. Two days cannot reproduce it;
 * the behaviour near the demand ceiling, where the month gets genuinely hard;
 * **whether the committed sweep under `public/` still matches this model.**
@@ -100,19 +102,23 @@ def solved(model):
         # days of schedule -- which is not a smoke test. 1% is loose enough to
         # finish quickly and tight enough that the recuperation window still
         # comes back at its constrained length.
-        solver = pyo.SolverFactory("appsi_highs")
-        solver.options["mip_rel_gap"] = 0.01
-        solver.options["time_limit"] = SOLVE_TIME_LIMIT_S
-        results = solver.solve(m)
+        original = (model.SOLVER, model.MIP_GAP, model.TIME_LIMIT_S)
+        model.SOLVER, model.MIP_GAP, model.TIME_LIMIT_S = (
+            "highs", 0.01, SOLVE_TIME_LIMIT_S
+        )
+        try:
+            results = model.solve_relax_and_fix(m)
+        finally:
+            model.SOLVER, model.MIP_GAP, model.TIME_LIMIT_S = original
         pyo.assert_optimal_termination(results)
         yield m, model.results_frame(m)
 
 
 def test_the_flowsheet_still_builds_and_solves(solved):
-    """The model constructs against the installed flexPSE and reaches optimal.
+    """The model constructs against the installed flex-pse and reaches optimal.
 
     This is the assertion that catches upstream drift: `pyproject.toml` tracks
-    flexPSE at `@main`, so a renamed unit-model option breaks this example with
+    flex-pse at `@main`, so a renamed unit-model option breaks this example with
     no commit landing in this repository.
     """
     _, frame = solved
@@ -148,6 +154,30 @@ def test_delivers_the_water_it_owes(solved, model):
     )
 
 
+def test_relax_and_fix_reports_its_bound(solved):
+    """The wrapper reads flex-pse's ``SolveReport`` back onto the model."""
+    m, _ = solved
+    assert m.relaxed_objective is not None
+    assert m.relaxed_objective <= m.objective() * (1 + 1e-6)
+    assert m.relaxation_gap is not None and m.relaxation_gap >= -1e-9
+    assert m.fix_attempts and m.statuses_fixed + m.statuses_free > 0
+
+
+def test_restart_wear_is_billed(solved, model):
+    """Every skid transition is charged as membrane wear in the operating cost.
+
+    Each start or stop moves a skid's feed by one rated feed, which the
+    ``restart_wear`` degradation penalty prices at half a restart.
+    """
+    m, frame = solved
+    report = model.report_cost(m)
+    transitions = sum(
+        frame[f"ro{i}_status"].diff().abs().iloc[1:].sum() for i in range(3)
+    )
+    expected = transitions * model.RESTART_WEAR_COST / 2
+    assert report.operating.scalar == pytest.approx(expected, rel=1e-4, abs=1e-6)
+
+
 def test_trains_run_as_a_lead_pair(solved):
     """Never exactly one train online.
 
@@ -163,7 +193,7 @@ def test_a_restart_costs_a_full_recuperation_window(solved, model):
     """Post-treatment is out for exactly `RECUP_STEPS` steps after a startup.
 
     This is the constraint the whole example exists to show, and the one the
-    docstring for `SOLVER_OPTIONS` says a loose MIP gap quietly violates -- so
+    `MIP_GAP` comment says a loose MIP gap quietly violates -- so
     assert the window's length rather than merely that it exists.
     """
     _, frame = solved

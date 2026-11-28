@@ -42,8 +42,14 @@ def _(mo, model):
 
     - Each train is either off or at rated feed. The plant runs 3 trains, 2, or
       none. `ro[0]` and `ro[1]` always run together, and `ro[2]` is the swing train.
-    - Going from 3 trains to 2 is free. Restarting from 0 is not: for 45 minutes
-      post-treatment is down and all the water goes back to the ocean.
+    - Going from 3 trains to 2 costs only membrane wear. Restarting from 0 costs
+      more: for 45 minutes post-treatment is down and all the water goes back to
+      the ocean.
+    - Every skid start and stop is billed as **membrane wear**
+      (\${model.RESTART_WEAR_COST:,.0f} a restart), a `flexops.logic.add_degradation`
+      penalty that sits in the operating cost beside the energy.
+    - Each skid's recovery is free in [{model.RECOVERY_MIN:.0%}, {model.RECOVERY_MAX:.0%}]
+      at every step.
     - Energy costs 4.5× more from 4pm to 9pm, plus a \$21.50/kW demand charge
       on peak-window draw.
 
@@ -255,6 +261,8 @@ def _(m, mo, model, pyo, pyunits, results):
     | Termination | `{results.solver.termination_condition}` |
     | MIP gap | {m.mip_gap:.3%} (only covers what fixing left free) |{_heuristic_rows}
     | **Electricity bill** | **\\${_cost.operating.electricity:,.2f}** for the month (`model.report_cost`) |
+    | Membrane wear | \\${_cost.operating.scalar:,.2f} for the month (restart penalties) |
+    | **Operating cost** | **\\${_cost.operating.total:,.2f}** |
     | Objective | \\${pyo.value(m.objective):,.2f} (what the solver minimizes; not the bill) |
     | Demand | {m.demand_af:,.0f} AF = {demand_m3:,.0f} m³, {m.demand_af / capacity_af:.0%} of capacity |
     | Product water | {product_m3:,.0f} m³ |

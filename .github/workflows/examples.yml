@@ -62,7 +62,7 @@ jobs:
             --with pytest --with 'pandas>=2' --with 'duckdb>=1.1' \
             pytest -q tests/test_sweep_data.py tests/test_wasm_notebooks.py
 
-  # The slow gate: real models, real solves, against whatever flexPSE main is
+  # The slow gate: real models, real solves, against whatever flex-pse main is
   # today.
   solve:
     runs-on: ubuntu-24.04
@@ -89,11 +89,11 @@ jobs:
         run: uv sync --group dev
 
       # Purely diagnostic: when this job goes red the first question is always
-      # "against which flexPSE?", and the answer belongs in the log rather than
+      # "against which flex-pse?", and the answer belongs in the log rather than
       # in a bisect. It must never be the thing that turns the job red -- a
       # missing flex-pse is caught loudly by Solve below. Mirrors the defensive
       # lookup in tools/sweep.py::_flexpse_provenance().
-      - name: Record the resolved flexPSE commit
+      - name: Record the resolved flex-pse commit
         run: |
           uv run --no-sync python - <<'PY'
           import importlib.metadata as md, json
@@ -176,6 +176,6 @@ jobs:
             --title "Committed pump_scheduling sweep no longer reproduces" \
             --body "The weekly rebuild solved \`examples/pump_scheduling\` and got different numbers than the sweep committed under \`public/\`.
 
-          Either flexPSE changed upstream in a way that moves this example's answer, or the committed data is stale. Re-run \`python tools/sweep.py examples/pump_scheduling\` and review the diff before committing it.
+          Either flex-pse changed upstream in a way that moves this example's answer, or the committed data is stale. Re-run \`python tools/sweep.py examples/pump_scheduling\` and review the diff before committing it.
 
           Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"

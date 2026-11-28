@@ -66,6 +66,10 @@ def _(mo):
 
     - **Inflexible**: the feed pump runs at the same rate all day.
     - **Flexible**: it can switch off, or run anywhere between 60 and 100%.
+
+    Each day's cost is the energy bill plus priced wear (pump starts and stops,
+    battery cycling). The battery's capital, spread over its life, is shown
+    on top: flexibility costs nothing to build, a battery doesn't.
     """)
     return
 
@@ -170,7 +174,9 @@ def _(np, summary):
             _infl["battery_fraction"].to_numpy()[::-1],
         )
     )
-    return battery_equivalent, flex_no_battery, infl_no_battery
+    # The cheapest day once the battery's capital is counted.
+    best = summary.loc[summary["total_cost"].idxmin()]
+    return battery_equivalent, best, flex_no_battery, infl_no_battery
 
 
 @app.cell
@@ -202,7 +208,10 @@ def _(
             group = group.sort_values("battery_fraction")
             color = STRATEGY_COLOR[strategy]
             ax.plot(group["battery_fraction"], group["operating_cost"], color=color,
-                    lw=2, marker="o", ms=6, mec=SURFACE, mew=2, label=strategy)
+                    lw=2, marker="o", ms=6, mec=SURFACE, mew=2,
+                    label=f"{strategy}: operating")
+            ax.plot(group["battery_fraction"], group["total_cost"], color=color,
+                    lw=1.5, ls="--", label=f"{strategy}: + battery capital")
             last = group.iloc[-1]
             ax.annotate(strategy, (last["battery_fraction"], last["operating_cost"]),
                         xytext=(8, 0), textcoords="offset points", va="center",
@@ -220,7 +229,7 @@ def _(
         ax.set_xlabel("Battery size (% of the plant's peak power)", color=MUTED, fontsize=9)
         ax.xaxis.set_major_formatter(lambda v, _: f"{v:.0%}")
         ax.set_xlim(-0.03, 1.15)
-        ax.set_ylim(0, frame["operating_cost"].max() * 1.12)
+        ax.set_ylim(0, frame["total_cost"].max() * 1.12)
         ax.legend(frameon=False, fontsize=8, labelcolor=MUTED, loc="lower left")
         return fig
 
@@ -229,7 +238,7 @@ def _(
 
 
 @app.cell
-def _(battery_equivalent, flex_no_battery, infl_no_battery, mo):
+def _(battery_equivalent, best, flex_no_battery, infl_no_battery, mo):
     mo.md(f"""
     Flexibility on its own cuts the daily bill from \\${infl_no_battery:.0f} to
     \\${flex_no_battery:.0f}, and it costs nothing to build. Getting the same
@@ -238,6 +247,10 @@ def _(battery_equivalent, flex_no_battery, infl_no_battery, mo):
 
     The flexible line flattens out past 60%: by then the pumps are already
     off for the whole peak window, so a bigger battery doesn't buy anything.
+
+    Count the battery's capital (the dashed lines) and the curves turn up: the
+    cheapest day overall is the **{best.strategy}** plant with a
+    **{best.battery_fraction:.0%}** battery, at \\${best.total_cost:.0f}.
     """)
     return
 
@@ -279,7 +292,11 @@ def _(DATA, battery, duckdb, strategy, summary):
 def _(infl_no_battery, mo, picked):
     mo.hstack(
         [
-            mo.stat(f"${picked.operating_cost:.0f}", label="Cost for the day"),
+            mo.stat(
+                f"${picked.operating_cost:.0f}",
+                label="Cost for the day",
+                caption=f"${picked.total_cost:.0f} with battery capital",
+            ),
             mo.stat(
                 f"{1 - picked.operating_cost / infl_no_battery:.0%}",
                 label="Cheaper than the worst case",
@@ -373,7 +390,8 @@ def _(
 def _(mo, provenance, summary):
     _table = summary[
         ["strategy", "battery_fraction", "battery_kw", "battery_kwh",
-         "operating_cost", "peak_window_grid_kwh"]
+         "operating_cost", "wear_cost", "battery_capital_cost", "total_cost",
+         "peak_window_grid_kwh"]
     ].rename(
         columns={
             "strategy": "Feed pump",
@@ -381,6 +399,9 @@ def _(mo, provenance, summary):
             "battery_kw": "Battery (kW)",
             "battery_kwh": "Battery (kWh)",
             "operating_cost": "Cost for the day ($)",
+            "wear_cost": "of which wear ($)",
+            "battery_capital_cost": "Battery capital ($/day)",
+            "total_cost": "Total ($)",
             "peak_window_grid_kwh": "Bought 4–9pm (kWh)",
         }
     )

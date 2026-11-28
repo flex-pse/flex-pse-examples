@@ -7,26 +7,27 @@
     "time_step_hours": 1
   },
   "fluid": {
+    "_comment": "The raw-water source is a flex-pse Feed block; suction_pressure_bar is its boundary condition. Density is a property-package constant.",
     "density_kg_per_m3": 1000.0,
     "suction_pressure_bar": 1.0
   },
   "feed_pump": {
-    "_comment": "Pumps into the tank. In the flexible strategy it is semicontinuous: either off, or anywhere in [min_flow_fraction, 1.0] of rated flow. In the inflexible strategy it is pinned at a single constant flow for the whole horizon (see model.inflexible_flow_m3_per_hr). delta_pressure_bar is the fixed pressure differential across the pump.",
+    "_comment": "Pumps into the tank. In the flexible strategy it is semicontinuous: either off, or anywhere in [min_flow_fraction, 1.0] of rated flow. In the inflexible strategy it is pinned at a single constant flow for the whole horizon (see model.inflexible_flow_m3_per_hr). delta_pressure_bar is the fixed pressure differential across the pump. start_stop_cost is a degradation penalty in $ per on/off transition, so the flexible schedule pays for every start and stop it makes.",
     "rated_flow_m3_per_hr": 250.0,
     "min_flow_fraction": 0.6,
     "delta_pressure_bar": 4.0,
-    "efficiency": 0.75
+    "efficiency": 0.75,
+    "start_stop_cost": 2.0
   },
   "tank": {
-    "_comment": "Sized so the flexible strategy can pre-fill and ride the whole peak window on stored water, but so the inflexible strategy -- which cannot pre-fill, because its pump never modulates -- gains nothing from it.",
+    "_comment": "Sized so the flexible strategy can pre-fill and ride the whole peak window on stored water, but so the inflexible strategy -- which cannot pre-fill, because its pump never modulates -- gains nothing from it. The tank is cyclic: it has to end the day at least as full as it started (Tank(cyclic=True)).",
     "max_volume_m3": 1500.0,
     "initial_volume_m3": 500.0,
     "level_min": 0.1,
-    "level_max": 0.95,
-    "terminal_volume_m3": 500.0
+    "level_max": 0.95
   },
   "product_pump": {
-    "_comment": "Draws from the tank and delivers to the user/product flow. Its flow is set by product_demand_m3_per_hr, so it is an inflexible load under either strategy.",
+    "_comment": "Draws from the tank and delivers to the customer, a flex-pse Product block whose per-hour min_demand is product_demand_m3_per_hr. It is an inflexible load under either strategy.",
     "delta_pressure_bar": 2.0,
     "efficiency": 0.7
   },
@@ -36,7 +37,7 @@
     235.0, 245.0, 235.0, 205.0, 175.0, 155.0, 145.0, 135.0
   ],
   "battery": {
-    "_comment": "Sizing options are fractions of the plant's peak electrical load (see reference_load_kw): power ratings are fraction * peak load, and energy capacity is fraction * peak load * storage_duration_hours.",
+    "_comment": "Sizing options are fractions of the plant's peak electrical load (see reference_load_kw): power ratings are fraction * peak load, and energy capacity is fraction * peak load * storage_duration_hours. The battery is cyclic: it ends the day at least as charged as it started. wear_cost_per_kwh is a throughput degradation penalty on every kWh discharged. The capital_* fields annualize the battery's installed cost with flexops.costing.capital_recovery_factor; that is reported beside the operating cost, not optimized.",
     "sizing_options": {
       "large": 1.0,
       "small": 0.4
@@ -46,7 +47,11 @@
     "eta_discharge": 0.95,
     "soc_min": 0.1,
     "soc_max": 0.95,
-    "initial_soc": 0.5
+    "initial_soc": 0.5,
+    "wear_cost_per_kwh": 0.03,
+    "capital_cost_per_kwh": 350.0,
+    "lifetime_years": 15,
+    "discount_rate": 0.07
   },
   "scenarios": {
     "_comment": "The 2x2. 'flexible' selects the feed pump strategy; 'battery' names a key of battery.sizing_options. 'selected' is the case the single-schedule charts render.",

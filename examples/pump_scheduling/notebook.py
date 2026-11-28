@@ -45,7 +45,18 @@ def _(mo):
 
     The product pump just follows demand. Each strategy gets a small and a large
     battery, so there are four cases. All four pump the same water with the same
-    energy, so the only difference in cost is *when* that energy gets bought.
+    energy, so the energy bill differs only in *when* that energy gets bought.
+
+    Two things make the comparison honest. **Wear is priced**: every start or
+    stop of the flexible pump, and every kWh the battery discharges, is a
+    `flexops.logic.add_degradation` penalty billed with the energy. And the
+    **battery's capital cost** is annualized with
+    `flexops.costing.capital_recovery_factor` and added per day, since
+    flexibility costs nothing to build and a battery doesn't.
+
+    Water enters through a flex-pse `Feed` block and leaves through a `Product`
+    block that holds delivery to the hourly demand profile. The tank and the
+    battery are both cyclic: each ends the day at least as full as it started.
 
     Inputs are in `inputs.json`, the model is in `model.py`, and `config.json` is the flex-pse spec `model.py` writes for the selected case.
     """)
@@ -82,6 +93,8 @@ def _(mo, model):
         | Tank | {cfg["tank"]["max_volume_m3"]:.0f} m³ max, starting at {cfg["tank"]["initial_volume_m3"]:.0f} m³, level held in [{cfg["tank"]["level_min"]:.2f}, {cfg["tank"]["level_max"]:.2f}] |
         | Product pump | follows demand, Δp = {cfg["product_pump"]["delta_pressure_bar"]:.1f} bar, η = {cfg["product_pump"]["efficiency"]:.2f} |
         | Product demand | {min(cfg["product_demand_m3_per_hr"]):.0f}–{max(cfg["product_demand_m3_per_hr"]):.0f} m³/hr, {sum(cfg["product_demand_m3_per_hr"]):.0f} m³ over the horizon |
+        | Wear | ${cfg["feed_pump"]["start_stop_cost"]:.2f} per feed-pump start or stop, ${cfg["battery"]["wear_cost_per_kwh"]:.3f} per kWh the battery discharges |
+        | Battery capital | ${cfg["battery"]["capital_cost_per_kwh"]:.0f}/kWh installed, {cfg["battery"]["lifetime_years"]} years at {cfg["battery"]["discount_rate"]:.0%} |
         | Peak window | {peak_hours[0]:02d}:00–{peak_hours[-1] + 1:02d}:00, energy at 4.5× the off-peak price plus a demand charge |
         | **Plant peak load** | **{peak_kw:.1f} kW** (battery sizes are a % of this) |
 
@@ -157,9 +170,6 @@ def _(mo):
     The inflexible pump can't stop, so the battery has to carry it through the
     peak, and the small battery runs out. The flexible pump fills the tank
     early and switches off for the whole peak window.
-
-    (Hour 0 is the tank's starting state, so the feed pump is off there in
-    every case.)
     """)
     return
 
@@ -240,14 +250,6 @@ def _(
         xycoords=("data", "axes fraction"), color=MUTED, fontsize=8,
         ha="center", va="top",
     )
-    # Hour 0 is the tank's initial-state snapshot, so the feed pump is pinned
-    # off there in every case; without this the inflexible line looks like it
-    # breaks its own "never off" definition.
-    for _ax in axes[0]:
-        _ax.annotate(
-            "hour 0:\ninitial state", (0.1, _flow_top * 0.30), color=MUTED,
-            fontsize=7.5, va="center", ha="left",
-        )
     axes[0][0].legend(frameon=False, fontsize=8, labelcolor=MUTED, ncols=2,
                       loc="upper left", bbox_to_anchor=(0, 0.94))
     fig.align_ylabels(axes[:, 0])
@@ -267,28 +269,37 @@ def _(BLUE, INK, MUTED, ORANGE, SIZE_COLOR, SURFACE, plt, scenarios, style):
     _sizes = ["large", "small"]
     _height = 0.34
     for _i, _size in enumerate(_sizes):
-        _costs, _ys = [], []
+        _costs, _capital, _ys = [], [], []
         for _j, _strategy in enumerate(_order):
             _s = next(
                 s for s in scenarios
                 if s["strategy"] == _strategy and s["sizing"] == _size
             )
             _costs.append(_s["operating_cost"])
+            _capital.append(_s["battery_capital_cost"])
             _ys.append(_j + (_i - 0.5) * (_height + 0.03))
-        _bars = ax2.barh(_ys, _costs, height=_height, color=SIZE_COLOR[_size],
-                         label=f"{_size} battery", zorder=2,
+        ax2.barh(_ys, _costs, height=_height, color=SIZE_COLOR[_size],
+                 label=f"{_size} battery: operating", zorder=2,
+                 edgecolor=SURFACE, lw=1.5)
+        # The battery's annualized capital, per day, stacked on the operating
+        # cost in a washed-out tint of the same hue.
+        _bars = ax2.barh(_ys, _capital, left=_costs, height=_height,
+                         color=SIZE_COLOR[_size], alpha=0.35,
+                         label=f"{_size} battery: capital", zorder=2,
                          edgecolor=SURFACE, lw=1.5)
-        ax2.bar_label(_bars, fmt="$%.2f", padding=6, color=INK, fontsize=9)
+        ax2.bar_label(_bars, labels=[f"${c + k:.2f}" for c, k in zip(_costs, _capital)],
+                      padding=6, color=INK, fontsize=9)
 
     ax2.set_yticks(range(len(_order)))
     ax2.set_yticklabels(_order)
     ax2.grid(False, axis="y")
     ax2.grid(True, axis="x", color="#e1e0d9", lw=0.8)
-    ax2.set_xlim(0, max(s["operating_cost"] for s in scenarios) * 1.2)
+    ax2.set_xlim(0, max(s["total_cost"] for s in scenarios) * 1.2)
     ax2.invert_yaxis()
     ax2.legend(frameon=False, fontsize=8, labelcolor=MUTED, ncols=2,
                loc="lower right")
-    ax2.set_xlabel("operating cost over the horizon ($)", color=MUTED, fontsize=9)
+    ax2.set_xlabel("cost for the day ($): operating, plus the battery's capital",
+                   color=MUTED, fontsize=9)
     ax2.set_title("Cost for the day: flexibility beats a bigger battery",
                   color=INK, fontsize=10, loc="left", pad=8)
     fig2
@@ -297,7 +308,7 @@ def _(BLUE, INK, MUTED, ORANGE, SIZE_COLOR, SURFACE, plt, scenarios, style):
 
 @app.cell
 def _(mo, scenarios):
-    _worst = max(s["operating_cost"] for s in scenarios)
+    _worst = max(s["total_cost"] for s in scenarios)
     rows = []
     for _scenario in scenarios:
         rows.append(
@@ -307,7 +318,10 @@ def _(mo, scenarios):
                 "battery (kW)": f"{_scenario['battery_kw']:.1f}",
                 "battery (kWh)": f"{_scenario['battery_kwh']:.0f}",
                 "operating cost ($)": f"{_scenario['operating_cost']:.2f}",
-                "vs worst case": f"-{(_worst - _scenario['operating_cost']) / _worst:.1%}",
+                "of which wear ($)": f"{_scenario['wear_cost']:.2f}",
+                "battery capital ($/day)": f"{_scenario['battery_capital_cost']:.2f}",
+                "total ($)": f"{_scenario['total_cost']:.2f}",
+                "vs worst case": f"-{(_worst - _scenario['total_cost']) / _worst:.1%}",
                 "peak-window draw (kW)": f"{_scenario['peak_window_grid_kw']:.2f}",
                 "peak-window energy (kWh)": f"{_scenario['peak_window_grid_kwh']:.1f}",
             }
@@ -472,20 +486,23 @@ def _(by_label, mo):
     ## Takeaways
 
     1. **The flexible plant with the small battery wins.** \\${_fs["operating_cost"]:.2f}
-       a day, vs. \\${_il["operating_cost"]:.2f} for the inflexible plant with the
-       large battery, using {(1 - _fs["battery_kw"] / _il["battery_kw"]):.0%} less
-       battery.
+       a day to run, vs. \\${_il["operating_cost"]:.2f} for the inflexible plant with
+       the large battery, using {(1 - _fs["battery_kw"] / _il["battery_kw"]):.0%} less
+       battery. With the batteries' capital added the gap widens to
+       \\${_fs["total_cost"]:.2f} vs. \\${_il["total_cost"]:.2f}.
     2. **Flexibility and storage do the same job.** Going from the small to the
        large battery saves \\${_is_["operating_cost"] - _il["operating_cost"]:.2f}
-       on the inflexible plant, but only
-       \\${_fs["operating_cost"] - _fl["operating_cost"]:.2f} on the flexible one.
-       The flexible schedule already moved the load the battery would have covered.
-    3. **It's about timing, not efficiency.** Every case pumps
+       a day on the inflexible plant, but only
+       \\${_fs["operating_cost"] - _fl["operating_cost"]:.2f} on the flexible one,
+       against \\${_fl["battery_capital_cost"] - _fs["battery_capital_cost"]:.2f} a day
+       of extra capital. The flexible schedule already moved the load the
+       battery would have covered.
+    3. **Wear is real but small.** The flexible pump's starts and stops and the
+       battery's cycling cost \\${_fs["wear_cost"]:.2f} a day in the winning case,
+       which the optimizer traded against the energy they save.
+    4. **It's about timing, not efficiency.** Every case pumps
        {_fs["frame"]["feed_flow_m3_per_hr"].sum():.0f} m³ using
        {_fs["frame"]["feed_pump_kw"].sum():.0f} kWh.
-
-    These are operating costs only. Capital cost isn't modeled yet, which would
-    only make the small battery look better.
     """)
     return
 
