@@ -100,15 +100,23 @@ feed for the whole horizon: near that ceiling the plant has to run flat out and
 there is nothing to schedule, and the further below it the demand sits, the more
 of the peak window the optimizer can afford to sit out.
 
-The objective is the in-model operating cost and nothing else. What makes the
-month tractable is not a term in it but *how it is solved*:
-:func:`solve_relax_and_fix` solves the integrality-relaxed model first, takes
-every status the relaxation already decided -- within :data:`FIX_TOL` of 0 or 1
--- as a decision and fixes it there, restores integrality, and re-solves as a
-MIP over the statuses that came back genuinely fractional. Those are the steps
-where the plant is actually choosing; the rest were never a search. It is a
-heuristic and says so: the relaxed objective is a valid lower bound, so
-``m.relaxation_gap`` bounds how far the schedule it returns can be from optimal.
+The objective is the in-model operating cost: the energy bill plus **membrane
+wear**. Every skid start and stop is priced as a
+:func:`flexops.logic.add_degradation` penalty -- a ``variation`` term on the
+skid's feed, which jumps by a full rated feed whenever the skid switches -- and
+billed through ``FlexCosting`` beside the energy, so a restart has to save more
+than :data:`RESTART_WEAR_COST` of energy to be worth making.
+
+What makes the month tractable is not a term in the objective but *how it is
+solved*. :func:`solve_relax_and_fix` hands the model to flex-pse's
+``RelaxAndFix`` solve strategy, which solves the integrality-relaxed model
+first, takes every binary the relaxation already decided -- within
+:data:`FIX_TOL` of 0 or 1 -- as a decision and fixes it there, restores
+integrality, and re-solves as a MIP over what came back genuinely fractional.
+Those are the steps where the plant is actually choosing; the rest were never a
+search. It is a heuristic and says so: the relaxed objective is a valid lower
+bound, so ``m.relaxation_gap`` bounds how far the schedule it returns can be
+from optimal.
 
 The objective is still not the bill, though it was never the bill: the in-model
 cost is a relaxed, scalarized proxy the solver can optimize over, and the
@@ -144,8 +152,13 @@ from flexops import (
     Splitter,
     TimeBlock,
 )
+from flexcore.config.schema import DegradationSpec, DegradationTermSpec
+from flex_pse_examples.examples.desalination_scheduling.extensions import (
+    recovery_window,
+)
 from flexops.logic import (
     add_conditional,
+    add_degradation,
     add_startup_delay,
     add_startup_shutdown,
     add_status,
@@ -246,68 +259,29 @@ _FLOW_TOL_M3_HR = 1e-6
 #: problem class; otherwise it warns and falls through its own priority list
 #: (``gurobi``, ``scip``, ``highs``, ``cbc``, ``ipopt``). HiGHS is the default
 #: because it ships with ``flex-pse[solvers]`` and needs no license.
-SOLVER = "gurobi"
+SOLVER = "highs"
 
-#: Solver options, keyed by the solver's own name for its own option spellings
-#: -- they are not translated anywhere, and a solver rejects a name it does not
-#: know (Gurobi raises outright on HiGHS's ``mip_rel_gap``). :func:`solve_model`
-#: looks these up under the solver ``get_solver`` *returned*, not the one asked
-#: for, so a fallback still gets options it understands. A solver with no entry
-#: here runs on its defaults: no gap, no time limit.
-#:
-#: ``mip_rel_gap``/``MIPGap`` ends the branch and bound once the incumbent is
-#: provably within that fraction of optimal, which is what keeps a month of unit
-#: commitment tractable; the time limit is the backstop, and a run that hits it
-#: is reported rather than silently accepted.
+#: Relative MIP gap and time limit, in flex-pse's solver-neutral form:
+#: ``SolverFacade.solve`` translates them into each solver's own option name
+#: (``MIPGap``/``TimeLimit`` on Gurobi, ``mip_rel_gap``/``time_limit`` on
+#: HiGHS), so a fallback solver still gets options it understands. The gap
+#: applies to every step of a relax-and-fix solve, and the time limit bounds the
+#: whole solve across all of them.
 #:
 #: 0.2%, not the usual 1%. The gap is not just a cost tolerance here -- it is a
 #: tolerance on the *schedule*, and a whole recuperation window is small against
 #: the month's bill. At 1% the exact month came back holding post-treatment out
 #: for 2h15m after a restart rather than the 45 minutes the constraint requires:
 #: feasible, within tolerance, and wrong on the one behaviour the example exists
-#: to show. At 0.2% the window is exactly three steps and the month still solves
-#: in a few minutes -- about 6 on a laptop, most of it the relax-and-fix MIP.
-#:
-#: ``NonConvex=2`` is what an unfixed recovery costs: the split
-#: ``permeate[t] == recovery * feed[t]`` is bilinear, so the month is a
-#: non-convex MIQCP and Gurobi has to run spatial branch and bound over it.
-#: Gurobi's default (``NonConvex=-1``) already does this; it is set explicitly
-#: so a run that gets slow points at its own cause. HiGHS cannot take the
-#: problem at all -- see :func:`_register_gurobi_for_quadratics`.
-SOLVER_OPTIONS = {
-    "highs": {"mip_rel_gap": 0.002, "time_limit": 1800},
-    "gurobi": {"MIPGap": 0.002, "TimeLimit": 1800, "NonConvex": 2},
-}
+#: to show. At 0.2% the window is exactly three steps.
+MIP_GAP = 0.002
+TIME_LIMIT_S = 1800
 
+#: Membrane wear per skid restart -- one stop and one start -- in the tariff's
+#: currency. Billed as a degradation penalty on each skid (see
+#: :func:`construct_plant`), half on the stop and half on the start.
+RESTART_WEAR_COST = 250.0
 
-def _register_gurobi_for_quadratics() -> None:
-    """Teach flex-pse's solver registry that Gurobi can take this model.
-
-    Unfixing recovery makes ``permeate[t] == recovery * feed[t]`` bilinear, and
-    flex-pse classifies *any* nonlinear constraint as ``NLP``/``MINLP`` --
-    quadratic included, since ``QP`` there means a quadratic *objective* only.
-    So the exact model is ``MINLP`` and the relaxation, whose binaries are gone,
-    is ``NLP``. The shipped ``CAPABILITIES`` lists Gurobi for ``LP``/``QP``/
-    ``MILP``, so ``get_solver`` passes over an installed Gurobi on both: with no
-    SCIP here the exact model raises outright, and the relaxation silently falls
-    through to IPOPT.
-
-    That IPOPT fallback is the worse of the two. IPOPT is a *local* solver, and
-    a relaxation that is only locally optimal is not a lower bound on the exact
-    cost -- which is the one thing :func:`main`'s ``relax_integrality`` promises.
-
-    Gurobi solves non-convex QCP and MIQCP by spatial branch and bound (what
-    ``NonConvex=2`` above asks for), so the registry entry is what is wrong here,
-    not the routing; ``CAPABILITIES`` is documented as the extension point for
-    exactly this. Idempotent, and a no-op if a future flex-pse ships the entries
-    itself.
-    """
-    from flexcore.solvers.classify import ProblemClass
-    from flexcore.solvers.registry import CAPABILITIES
-
-    CAPABILITIES.setdefault("gurobi", set()).update(
-        {ProblemClass.NLP, ProblemClass.MINLP}
-    )
 
 def main(
     relax_integrality: bool = False,
@@ -316,9 +290,9 @@ def main(
     """Build the desalination scheduling model, ready to solve.
 
     Args:
-        relax_integrality: ``True`` to drop the RO skids' ``status``, ``startup``
-            and ``shutdown`` -- and post-treatment's ``status`` -- from
-            ``Binary`` to ``UnitInterval``, and leave them there. The month
+        relax_integrality: ``True`` to drop the RO skids' and post-treatment's
+            ``status`` from ``Binary`` to ``UnitInterval``, and leave them there
+            (``startup``/``shutdown`` are already continuous). The month
             carries ~27k binaries; the relaxation solves in seconds, but it is
             **optimistic** -- a fractional status runs a skid below its turndown
             floor, and a fractional ``ro[0]`` startup lets post-treatment stay
@@ -447,15 +421,14 @@ def logic_units(plant):
 def status_vars(plant):
     """Yield every status variable in the flowsheet that is still a decision.
 
-    The set :func:`solve_relax_and_fix` reads off the relaxation and fixes.
-    Statuses only -- ``startup`` and ``shutdown`` follow from them through the
-    constraints ``add_startup_shutdown`` attached, so fixing a status decides
-    its startup too.
+    The binaries ``RelaxAndFix`` reads off the relaxation and fixes, which is
+    what :func:`solve_relax_and_fix` counts them for. Statuses only --
+    ``startup`` and ``shutdown`` are continuous and follow from them through
+    the constraints ``add_startup_shutdown`` attached, so fixing a status
+    decides its startup too.
 
     The always-on units' statuses are **fixed at 1** by :func:`construct_plant`
-    and are skipped: they were never a decision. Anything the routine itself
-    fixed is skipped for the same reason, which is why it keeps its own list of
-    those and releases them before it reads this again.
+    and are skipped: they were never a decision.
     """
     for unit in plant.component_data_objects(pyo.Block, descend_into=True):
         status = unit.component("status")
@@ -492,8 +465,8 @@ def add_demand_and_objective(m, demand_af: float = DEMAND_AF_PER_MONTH):
     return m
 
 
-def solve_model(m, prefer: str | None = None):
-    """Solve ``m`` with :data:`SOLVER` and the matching :data:`SOLVER_OPTIONS`.
+def solve_model(m, prefer: str | None = None, *, strategy=None):
+    """Solve ``m`` with :data:`SOLVER`, :data:`MIP_GAP` and :data:`TIME_LIMIT_S`.
 
     Records the achieved relative MIP gap on ``m.mip_gap`` and snaps power
     noise to exactly zero -- a MILP solver returns an idle plant as a few
@@ -508,17 +481,22 @@ def solve_model(m, prefer: str | None = None):
         prefer: Overrides :data:`SOLVER` for this solve. ``get_solver`` honours
             it only if that solver is installed and can take the problem class;
             otherwise it warns and falls through its own priority list.
+        strategy: A flex-pse solve strategy (``flexcore.solvers.RelaxAndFix``,
+            say); ``None`` solves once, directly.
 
     Returns:
-        The Pyomo results object.
+        The Pyomo results object. The facade's step-by-step
+        ``SolveReport`` is kept on ``m.solve_report``.
     """
     from flexcore.solvers import get_solver
 
-    _register_gurobi_for_quadratics()
-    solver = get_solver(model=m, prefer=prefer or SOLVER)
-    # Keyed on what came back, not on what was asked for: the options are the
-    # solver's own spellings, and a fallback would choke on another's.
-    results = solver.solve(m, options=dict(SOLVER_OPTIONS.get(solver.name, {})))
+    solver = get_solver(model=m, prefer=prefer or SOLVER, strategy=strategy)
+    results = solver.solve(
+        m,
+        mip_gap=MIP_GAP,
+        time_limit=TIME_LIMIT_S,
+    )
+    m.solve_report = solver.last_report
 
     problem = results.problem
     lower, upper = problem.lower_bound, problem.upper_bound
@@ -534,69 +512,51 @@ def solve_model(m, prefer: str | None = None):
     return results
 
 
-#: Termination conditions the fixing ladder in :func:`solve_relax_and_fix`
-#: reads as "these fixes cut off every schedule". ``infeasibleOrUnbounded`` is
-#: in here because a presolve that folds the two cannot tell them apart, and
-#: this model is bounded below by construction.
-_INFEASIBLE = frozenset(
-    {
-        pyo.TerminationCondition.infeasible,
-        pyo.TerminationCondition.infeasibleOrUnbounded,
-    }
-)
-
-
 def solve_relax_and_fix(m, *, tol: float = FIX_TOL, prefer: str | None = None):
     """Solve the month by relaxing, fixing what the relaxation decided, re-solving.
 
-    The exact month is ~27k binaries and the schedule the plant actually has is
-    made of long flat runs, so most of those binaries are not a decision anyone
-    is making -- they are a search the solver has to close anyway. This routine
-    lets the relaxation say which:
+    A thin wrapper over flex-pse's ``RelaxAndFix`` solve strategy, which used to
+    be written out here. The exact month is ~27k binaries and the schedule the
+    plant actually has is made of long flat runs, so most of those binaries are
+    not a decision anyone is making. The strategy:
 
-    1. Relax every logic binary to ``UnitInterval`` and solve. The relaxed
-       objective is a **valid lower bound** on the exact one, and it is kept on
-       ``m.relaxed_objective`` for exactly that reason.
-    2. Fix every status the relaxation already decided -- below ``tol``, or
-       above ``1 - tol`` -- at that integer. Statuses only: ``startup`` and
-       ``shutdown`` follow from them through their own constraints.
-    3. Restore integrality and re-solve as a MIP over what is left, which is the
-       genuinely fractional statuses -- the steps where the LP is trading a
-       fraction of a train against the tariff and the plant has to pick a side.
+    1. Relaxes every free binary to ``UnitInterval`` and solves. The relaxed
+       objective is a **valid lower bound** on the exact one, kept on
+       ``m.relaxed_objective``.
+    2. Fixes every binary the relaxation already decided -- below ``tol``, or
+       above ``1 - tol`` -- at that integer. ``startup`` and ``shutdown`` are
+       continuous (they follow from ``status`` through their own constraints),
+       so this fixes statuses.
+    3. Restores integrality and re-solves as a MIP over what is left.
 
-    It is a heuristic, and the honest number for it is ``m.relaxation_gap``, not
-    ``m.mip_gap``: the final solve's gap is the gap of the *fixed* subproblem and
-    says nothing at all about the statuses that were fixed before it started.
-    The gap against the relaxation's bound covers both.
+    Fixing can cut off every feasible schedule -- pin post-treatment on at a step
+    and its ``startup_delay`` forces ``ro[0]`` on there *and* forbids a restart
+    in the preceding 45 minutes. So an infeasible re-solve steps the tolerance
+    down (``tol``, ``tol/2``, ``tol/4``, then 0) and fixes again from the same
+    relaxed values; the last rung fixes nothing and *is* the exact MILP. The
+    strategy leaves the model with its original domains and nothing newly
+    fixed, with the final solution loaded.
 
-    **The fixing ladder.** Fixing can cut off every feasible schedule -- pin
-    post-treatment on at a step and its ``startup_delay`` forces
-    ``ro[0]`` on there *and* forbids a restart in the preceding 45 minutes, which
-    may be the only way the month meets its demand. So an infeasible re-solve is
-    not an answer here; it steps the tolerance down (``tol``, ``tol/2``,
-    ``tol/4``, then 0) and fixes again from the same relaxed values, handing
-    more of the decision back to the solver each time. The last rung fixes
-    nothing and *is* the exact MILP, so the ladder always ends somewhere honest.
-    Every rung tried is recorded on ``m.fix_attempts``.
+    It is a heuristic, and the honest number for it is ``m.relaxation_gap``,
+    not ``m.mip_gap``: the final solve's gap is the gap of the *fixed*
+    subproblem and says nothing about the binaries fixed before it started.
 
     Args:
         m: A model from :func:`main`, built exact. A model built with
             ``relax_integrality=True`` is the LP comparison case and is
-            rejected: this routine would hand it back with its integrality
-            restored, which is not the model that was asked for.
+            rejected.
         tol: Distance from an integer within which a relaxed status is taken as
-            decided. See :data:`FIX_TOL`. ``0`` fixes nothing, which makes this
-            the exact MILP with a lower bound computed first.
-        prefer: Passed to :func:`solve_model` for both solves.
+            decided. See :data:`FIX_TOL`. ``0`` fixes nothing.
+        prefer: Passed to :func:`solve_model`.
 
     Returns:
         The Pyomo results object of the solve that produced the returned
-        schedule. Alongside it, on the model:
+        schedule. Alongside it, on the model, read off the strategy's
+        ``SolveReport`` (also kept whole on ``m.solve_report``):
 
         * ``m.relaxed_objective`` -- the relaxation's cost, a lower bound.
         * ``m.relaxation_gap`` -- how far the returned schedule sits above it.
-        * ``m.fix_tol`` -- the rung that produced the answer, which is ``tol``
-          unless the ladder had to step down.
+        * ``m.fix_tol`` -- the rung that produced the answer.
         * ``m.statuses_fixed`` / ``m.statuses_free`` -- how much of the month
           the relaxation decided and how much went to the MIP.
         * ``m.fix_attempts`` -- ``(tol, fixed, termination)`` per rung tried.
@@ -604,6 +564,8 @@ def solve_relax_and_fix(m, *, tol: float = FIX_TOL, prefer: str | None = None):
     Raises:
         ValueError: If ``m`` was built with ``relax_integrality=True``.
     """
+    from flexcore.solvers import RelaxAndFix
+
     if m.is_relaxed:
         raise ValueError(
             "solve_relax_and_fix needs a model built exact -- it relaxes and "
@@ -612,71 +574,33 @@ def solve_relax_and_fix(m, *, tol: float = FIX_TOL, prefer: str | None = None):
             "solve it with solve_model, or rebuild it with main()."
         )
 
-    # Release what an earlier call fixed. Without this a second solve at a new
-    # demand would inherit the first one's schedule as hard constraints --
-    # status_vars skips fixed data, so they would not even show up as decisions
-    # to reconsider.
-    for datum in getattr(m, "fixed_statuses", ()):
-        datum.unfix()
+    n_statuses = sum(1 for _ in status_vars(m.plant))
+    results = solve_model(m, prefer=prefer, strategy=RelaxAndFix(fix_tol=tol))
+    report = m.solve_report
+    rungs = report.steps[1:]  # steps[0] is the relaxation
 
-    units = list(logic_units(m.plant))
-    for unit in units:
-        relax(unit)
-    m.is_relaxed = True
-    relaxed_results = solve_model(m, prefer=prefer)
-    m.relaxed_objective = pyo.value(m.objective)
-    # Snapshot rather than read the Vars again later: the solves below overwrite
-    # them, and every rung of the ladder fixes from the same relaxed answer.
-    relaxed_statuses = [(datum, pyo.value(datum)) for datum in status_vars(m.plant)]
-
-    for unit in units:
-        unrelax(unit)
-    m.is_relaxed = False
-
-    if relaxed_results.solver.termination_condition in _INFEASIBLE:
-        # No bound and nothing to fix. The exact model is infeasible too -- the
-        # relaxation is a superset of it -- so this is the answer, and a demand
+    m.relaxed_objective = report.bound
+    m.fix_attempts = [
+        (_rung_tol(step.label), step.n_fixed, step.termination) for step in rungs
+    ]
+    if not rungs:
+        # The relaxation was infeasible, so the exact month is too -- a demand
         # above max_product_af is the usual reason.
-        m.relaxed_objective = None
-        m.relaxation_gap = None
-        m.fix_tol = None
-        m.fixed_statuses = []
-        m.statuses_fixed, m.statuses_free = 0, len(relaxed_statuses)
-        m.fix_attempts = []
-        return relaxed_results
-
-    ladder = [tol, tol / 2, tol / 4, 0.0]
-    m.fix_attempts = []
-    results = relaxed_results  # rebound on the first rung; the ladder is never empty
-    for rung, rung_tol in enumerate(ladder):
-        for datum in getattr(m, "fixed_statuses", ()):
-            datum.unfix()
-        fixed = []
-        # Strict, so the last rung fixes nothing rather than pinning every
-        # status that landed exactly on an integer.
-        for datum, value in relaxed_statuses:
-            if value < rung_tol:
-                datum.fix(0)
-            elif value > 1 - rung_tol:
-                datum.fix(1)
-            else:
-                continue
-            fixed.append(datum)
-        m.fixed_statuses = fixed
-
-        results = solve_model(m, prefer=prefer)
-        condition = results.solver.termination_condition
-        m.fix_attempts.append((rung_tol, len(fixed), condition))
-        if condition not in _INFEASIBLE or rung == len(ladder) - 1:
-            break
-
+        m.relaxation_gap = m.fix_tol = None
+        m.statuses_fixed, m.statuses_free = 0, n_statuses
+        return results
     m.fix_tol, m.statuses_fixed, _ = m.fix_attempts[-1]
-    m.statuses_free = len(relaxed_statuses) - m.statuses_fixed
-    objective = pyo.value(m.objective)
-    m.relaxation_gap = (
-        abs(objective - m.relaxed_objective) / abs(objective) if objective else 0.0
-    )
+    m.statuses_free = n_statuses - m.statuses_fixed
+    m.relaxation_gap = report.gap
     return results
+
+
+def _rung_tol(label: str) -> float:
+    """Read the fixing tolerance out of a ``RelaxAndFix`` step label."""
+    import re
+
+    match = re.search(r"fix_tol=([0-9.eE+-]+)", label)
+    return float(match.group(1)) if match else float("nan")
 
 
 def report_cost(m):
@@ -802,31 +726,28 @@ def construct_plant(m):
         costing_package=m.costing,
     )
 
-    # Recovery is a degree of freedom, not a plant constant. flex-pse builds a
-    # process parameter as a scalar Var *fixed* at its configured value, exactly
-    # so it can be unfixed in place; unfixing it here hands the optimizer the
-    # membrane window, with the configured RECOVERY left behind as the starting
-    # point. One value per skid for the whole horizon -- the Var is scalar, not
-    # time-indexed -- so this is a design choice the schedule is solved around,
-    # not a knob that moves step to step.
+    # Recovery is a degree of freedom, not a plant constant: each skid may run
+    # anywhere in [RECOVERY_MIN, RECOVERY_MAX] at every step. Written as
+    # flex-pse writes it -- ``permeate[t] == recovery[t] * feed[t]`` with
+    # recovery unfixed -- that is bilinear, and the month a non-convex MIQCP
+    # only a global solver can take. Because recovery is chosen per step and
+    # feed is non-negative, the same choice is exactly the linear window
+    # ``RECOVERY_MIN * feed[t] <= permeate[t] <= RECOVERY_MAX * feed[t]``, which
+    # is what the recovery_window extension writes in place of the split. The
+    # month stays a MILP, so HiGHS solves it, and the recovery a schedule ran at
+    # is read back as permeate / feed.
     #
-    # It costs the model its problem class: ``permeate[t] == recovery * feed[t]``
-    # is bilinear the moment recovery stops being a constant, so the month is a
-    # non-convex MIQCP rather than a MILP. See SOLVER_OPTIONS for what that
-    # takes. The bilinearity is only in 3 scalars, so spatial branch and bound
-    # has very little to branch on, but it is not free.
-    #
-    # And until the surrogate in the TODO above lands, the answer is known in
-    # advance: recovery pins to RECOVERY_MAX at every demand. With intensity on a
-    # per-permeate basis a m^3 of product costs the same 3.34 kWh whatever the
-    # recovery, so recovery buys nothing on the *energy* side -- what it buys is
-    # capacity. The intake is fixed-duty, so a higher recovery turns the same
-    # seawater into more permeate per skid-hour, and the month's obligation is
-    # met in fewer running hours that the schedule can then place in the cheap
-    # ones. The window only starts to trade off once intensity rises with
-    # recovery, which is what the surrogate above is for.
-    for i in plant.trains:
-        plant.ro[i].recovery.unfix()
+    # Until the surrogate in the TODO above lands, the answer is known in
+    # advance: recovery pins to RECOVERY_MAX whenever a skid runs. With
+    # intensity on a per-permeate basis a m^3 of product costs the same 3.34 kWh
+    # whatever the recovery, so recovery buys nothing on the *energy* side --
+    # what it buys is capacity. The intake is fixed-duty, so a higher recovery
+    # turns the same seawater into more permeate per skid-hour, and the month's
+    # obligation is met in fewer running hours that the schedule can then place
+    # in the cheap ones. Once intensity rises with recovery the window starts to
+    # trade off step by step -- and the extension has to go, since the product
+    # it removed comes back.
+    recovery_window(m, unit="plant.ro")
 
 
     plant.post_treatment = ConstantEnergyIntensityModel(
@@ -1034,6 +955,29 @@ def construct_plant(m):
             plant.ro[i], plant.ro[i].status, min_uptime=recup_steps, min_downtime=1
         )
 
+    # Membrane wear. Every stop and every start loads the membranes and their
+    # high-pressure pump, so each is priced as a degradation penalty billed with
+    # the energy. The term watches the skid's feed rather than its status: feed
+    # is either 0 or rated (MIN_FEED == RATED_FEED), so |feed[t] - feed[t-1]|
+    # is one rated feed per transition, and feed -- unlike status, which the
+    # logic stage builds -- exists early enough for a spec's degradation
+    # element to find it on rebuild.
+    for i in plant.trains:
+        add_degradation(
+            plant.ro[i],
+            DegradationSpec(
+                name="restart_wear",
+                terms=[
+                    DegradationTermSpec(
+                        kind="variation",
+                        variable="feed",
+                        price=RESTART_WEAR_COST / 2 / rated_feed,
+                    )
+                ],
+            ),
+            costing=m.costing,
+        )
+
     # Post-treatment is the one downstream unit that is *not* always on: it is
     # what the recuperation window takes out. Floor of 0, so it can carry the
     # whole header or nothing.
@@ -1181,6 +1125,14 @@ def results_frame(m):
         data[f"ro{i}_feed_m3_per_hr"] = [pyo.value(plant.ro[i].feed[t]) for t in ti]
         data[f"ro{i}_permeate_m3_per_hr"] = [
             pyo.value(plant.ro[i].permeate[t]) for t in ti
+        ]
+        # Read back from the flows: recovery[t] itself is out of the model (see
+        # the recovery_window extension). NaN while the skid is off.
+        data[f"ro{i}_recovery"] = [
+            pyo.value(plant.ro[i].permeate[t]) / feed
+            if (feed := pyo.value(plant.ro[i].feed[t])) > _FLOW_TOL_M3_HR
+            else float("nan")
+            for t in ti
         ]
         data[f"ro{i}_status"] = [status(i, t) for t in ti]
         data[f"ro{i}_startup"] = [startup(i, t) for t in ti]

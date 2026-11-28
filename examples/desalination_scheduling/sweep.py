@@ -11,7 +11,8 @@ sit out the whole peak window.
 So the sweep is that ratio, and the page it feeds is a picture of the plant
 running out of slack. Each point is a full calendar month at 15-minute
 resolution -- ~27,000 binaries -- solved exactly through
-`model.solve_relax_and_fix`, which takes about ten seconds a point with Gurobi.
+`model.solve_relax_and_fix` -- flex-pse's `RelaxAndFix` solve strategy on
+HiGHS -- which takes about a minute and a half a point.
 """
 
 import model
@@ -23,15 +24,15 @@ import model
 #: into the corner where the plant is nearly out of slack. `max_product_af` is
 #: quoted at `RECOVERY_MAX`, so up there the month is only feasible with recovery
 #: pinned near the top of its window everywhere at once, and the search gets hard
-#: fast: every point at or below 0.78 closes in about twenty seconds, and every
-#: point from 0.83 up runs into :data:`TIME_LIMIT_S`.
+#: fast. With Gurobi on the old bilinear form every point from 0.83 up ran into
+#: :data:`TIME_LIMIT_S`; on the linear recovery window HiGHS closes 0.95 well
+#: inside it, but the limit stays as a backstop.
 #:
 #: That is affordable because the points are independent and
 #: `tools/sweep.py --jobs` solves them side by side, so the hard tail costs about
 #: one time limit of wall clock rather than one per point. A point that hits the
 #: limit is reported with its achieved gap and a `maxTimeLimit` termination in
-#: `summary.parquet` rather than silently accepted -- past 0.83 the schedule is
-#: feasible but not proven optimal.
+#: `summary.parquet` rather than silently accepted.
 FRACTIONS = (0.50, 0.58, 0.66, 0.72, 0.78, 0.83, 0.87, 0.92, 0.95)
 
 #: The reduced sweep for CI: the two ends and the knee between them.
@@ -68,10 +69,7 @@ def setup(*, smoke: bool = False):
     # A sweep is many months, not one, so the module's 1800 s backstop is far too
     # generous. Narrow it here rather than in `model.py`, where it is the right
     # value for someone solving a single month on purpose.
-    for options in model.SOLVER_OPTIONS.values():
-        for key in ("TimeLimit", "time_limit"):
-            if key in options:
-                options[key] = TIME_LIMIT_S
+    model.TIME_LIMIT_S = TIME_LIMIT_S
 
     return model.main(demand_af=points(smoke=smoke)[0]["demand_af"])
 
@@ -111,6 +109,7 @@ def solve_point(m, point: dict):
         "objective": float(m.objective()),
         "operating_cost": float(report.operating.total),
         "electricity_cost": float(report.operating.electricity),
+        "wear_cost": float(report.operating.scalar),
         "peak_kw": float(frame["grid_kw"].max()),
         "restarts": restarts,
         "offspec_af": offspec_af,
@@ -120,7 +119,8 @@ def solve_point(m, point: dict):
             ].sum()
             * step_hours
         ),
-        "solver": model.SOLVER,
+        # The solver that produced the schedule, not the one asked for.
+        "solver": m.solve_report.steps[-1].solver,
         # Report what the solver actually said. Points near the top of the range
         # hit TIME_LIMIT_S and come back `maxTimeLimit` with a feasible schedule
         # and a non-zero gap -- which is a fine thing to publish, and a terrible

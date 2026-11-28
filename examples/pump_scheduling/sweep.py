@@ -58,8 +58,7 @@ def solve_point(cfg: dict, point: dict):
         scalars that become this point's row in ``summary.csv``.
     """
     fraction = point["battery_fraction"]
-    peak_kw = model.reference_load_kw(cfg)
-    duration = cfg["battery"]["storage_duration_hours"]
+    battery_kw, battery_kwh = model.battery_ratings(cfg, fraction)
 
     # `build_model` takes a *name* from the inputs' sizing_options, not a number, so
     # sweeping off-grid fractions means writing the fraction into a copy of the
@@ -75,17 +74,16 @@ def solve_point(cfg: dict, point: dict):
     m = model.build_model(cfg, flexible=point["flexible"], battery_sizing=sizing)
     model.solve_model(m)
 
-    report = m.costing.report_cost(m)
     frame = model.results_frame(m)
     in_peak = frame.index.hour.isin(model.peak_window_hours())
+    costs = model.cost_summary(cfg, m, battery_kwh if sizing else None)
 
     return frame, {
         "strategy": "flexible" if point["flexible"] else "inflexible",
-        "battery_kw": fraction * peak_kw,
-        "battery_kwh": fraction * peak_kw * duration,
-        "objective": float(report.operating.total),
-        "operating_cost": float(report.operating.total),
-        "electricity_cost": float(report.operating.electricity),
+        "battery_kw": battery_kw,
+        "battery_kwh": battery_kwh,
+        "objective": costs["operating_cost"],
+        **costs,
         "peak_kw": float(frame.loc[in_peak, "grid_kw"].max()),
         "peak_window_grid_kwh": float(frame.loc[in_peak, "grid_kw"].sum()),
         "solver": "highs",

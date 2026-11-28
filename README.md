@@ -1,6 +1,6 @@
 # flex-pse-examples
 
-Example problems built with [flex-pse](https://github.com/flex-pse/flexPSE).
+Example problems built with [flex-pse](https://github.com/flex-pse/flex-pse).
 
 **Browse them at [flex-pse.github.io/flex-pse-examples](https://flex-pse.github.io/flex-pse-examples/).**
 Every example has a page that runs in your browser, nothing to install.
@@ -8,7 +8,17 @@ Every example has a page that runs in your browser, nothing to install.
 | Example | Question | Page | Solver |
 | --- | --- | --- | --- |
 | [Pump scheduling](examples/pump_scheduling/) | Bigger battery, or flexible pumps? | [open](https://flex-pse.github.io/flex-pse-examples/notebooks/pump_scheduling.html) | HiGHS |
-| [Desalination scheduling](examples/desalination_scheduling/) | How does a monthly water target change the cost per acre-foot? | [open](https://flex-pse.github.io/flex-pse-examples/notebooks/desalination_scheduling.html) | Gurobi |
+| [Desalination scheduling](examples/desalination_scheduling/) | How does a monthly water target change the cost per acre-foot? | [open](https://flex-pse.github.io/flex-pse-examples/notebooks/desalination_scheduling.html) | HiGHS |
+
+What each example shows off in flex-pse:
+
+| | Pump scheduling | Desalination scheduling |
+| --- | --- | --- |
+| Spec (`config.json`) | emitted with `flexops.emit_model`, schema 0.2.0; one `extension` element | emitted with `flexops.emit_model`, schema 0.2.0; one `extension` element (`recovery_window`) |
+| `Feed` / `Product` | raw-water `Feed` carries the suction pressure; customer `Product` holds delivery to a 24-value per-hour `min_demand` series | seawater `Feed`, an outfall `Product`, and a potable `Product` with a horizon-basis volume obligation |
+| Costing | EECO tariff, plus `add_degradation` wear (pump starts/stops, battery throughput) and battery capital annualized with `capital_recovery_factor` | EECO tariff, plus `add_degradation` membrane wear per skid restart |
+| Storage | cyclic `Tank` and cyclic `BatteryModel` | none |
+| Solve | HiGHS, direct | HiGHS through flex-pse's `RelaxAndFix` strategy; time-indexed RO recovery as an exact linear window |
 
 The solvers don't run in a browser, so each model is solved ahead of time over a
 range of one input, and the results are committed as Parquet under
@@ -24,7 +34,7 @@ pip install --group dev   # only for the tests
 flex-pse is installed from its `main` branch. To pick up newer changes:
 
 ```bash
-pip install --force-reinstall --no-deps "flex-pse[solvers] @ git+https://github.com/flex-pse/flexPSE.git@main"
+pip install --force-reinstall --no-deps "flex-pse[solvers] @ git+https://github.com/flex-pse/flex-pse.git@main"
 ```
 
 ## Running an example

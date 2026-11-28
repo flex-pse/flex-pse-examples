@@ -1,5 +1,5 @@
 {
-  "schema_version": "0.1.0",
+  "schema_version": "0.2.0",
   "name": "desalination_example",
   "elements": [
     {
@@ -525,6 +525,19 @@
       ]
     },
     {
+      "name": "restart_wear",
+      "terms": [
+        {
+          "kind": "variation",
+          "variable": "feed",
+          "price": 0.370183907365179
+        }
+      ],
+      "kind": "degradation",
+      "unit": "plant.ro",
+      "costing_package": "costing"
+    },
+    {
       "kind": "conditional",
       "unit": "plant.ro[0]",
       "implies": "plant.ro[1]"
@@ -616,8 +629,12 @@
       "value": 1063.5
     },
     {
-      "kind": "unfix",
-      "variable": "plant.ro[*].recovery"
+      "kind": "extension",
+      "name": "recovery_window",
+      "entry_point": "flex_pse_examples.examples.desalination_scheduling.extensions:recovery_window",
+      "options": {
+        "unit": "plant.ro"
+      }
     },
     {
       "kind": "objective"

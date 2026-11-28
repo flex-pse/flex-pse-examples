@@ -86,7 +86,7 @@ def _(EXAMPLE, mo):
         mo.md(
             f"""
     These are **precomputed** results. Each month is a big mixed-integer
-    problem (about 27,000 on/off decisions) solved with Gurobi, which doesn't
+    problem (about 27,000 on/off decisions) solved with HiGHS, which doesn't
     run in a browser. The model and a notebook that solves it live in
     [the repo]({_repo}).
     """
@@ -280,7 +280,8 @@ def _(DATA, duckdb, month, summary):
 def _(mo, picked):
     mo.hstack(
         [
-            mo.stat(f"${picked.operating_cost / 1000:,.0f}k", label="Power bill for the month"),
+            mo.stat(f"${picked.operating_cost / 1000:,.0f}k", label="Operating cost for the month",
+                    caption=f"${picked.wear_cost / 1000:,.0f}k of it membrane wear"),
             mo.stat(f"${picked.usd_per_af:,.0f}", label="Per acre-foot"),
             mo.stat(f"{picked.restarts:.0f}", label="Restarts"),
             mo.stat(f"{picked.offspec_af:.1f} AF", label="Dumped while restarting"),
@@ -384,13 +385,14 @@ def _(BLUE, INK, MUTED, PEAK, SURFACE, np, plt, profile, style):
 @app.cell
 def _(mo, provenance, summary):
     _table = summary[
-        ["capacity_fraction", "demand_af", "operating_cost", "usd_per_af", "restarts",
+        ["capacity_fraction", "demand_af", "operating_cost", "wear_cost", "usd_per_af", "restarts",
          "offspec_af", "peak_window_kwh", "termination", "mip_gap"]
     ].rename(
         columns={
             "capacity_fraction": "Target (% of capacity)",
             "demand_af": "Target (AF)",
-            "operating_cost": "Power bill ($)",
+            "operating_cost": "Operating cost ($)",
+            "wear_cost": "of which wear ($)",
             "usd_per_af": "$ per AF",
             "restarts": "Restarts",
             "offspec_af": "Dumped (AF)",
@@ -432,8 +434,8 @@ def _(mo, provenance, summary):
     | --- | --- |
     {_rows}
 
-    To regenerate: `python tools/sweep.py examples/desalination_scheduling`. You'll
-    need a Gurobi license, since the full month is a non-convex MIQCP.
+    To regenerate: `python tools/sweep.py examples/desalination_scheduling`. It runs on
+    HiGHS, which ships with flex-pse, and takes a minute or two a point.
     """
             ),
         }

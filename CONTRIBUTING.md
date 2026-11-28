@@ -189,12 +189,12 @@ run rather than reusing a stale one.
 
 **Not covered, and worth knowing:**
 
-- The desalination example's full month. It is a non-convex MIQCP needing Gurobi,
-  and there is no Gurobi license on a public runner. CI solves a linearized short
+- The desalination example's full month. It solves on HiGHS, but at a minute or
+  two a point it is too slow for every pull request, so CI solves a short
   horizon instead.
 - Whether a committed sweep still matches what the model produces today. The
-  weekly `drift` job checks `pump_scheduling` only. For anything Gurobi-bound
-  that remains a human obligation — a green badge over a two-year-old sweep is
+  weekly `drift` job checks `pump_scheduling` only. For the desalination
+  sweep that remains a human obligation — a green badge over a two-year-old sweep is
   the most likely way this site goes quietly wrong.
 
 Regenerate a sweep whenever the model behind it changes. Nothing will remind you.
